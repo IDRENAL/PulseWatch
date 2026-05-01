@@ -2,15 +2,13 @@ from app.database import Base
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from sqlalchemy import func
-from sqlalchemy import ForeignKey
 
-class Server(Base):
-    __tablename__ = "servers"
+
+class User(Base):
+    __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(unique=True)
-    api_key_hash: Mapped[str]
+    email: Mapped[str] = mapped_column(unique=True)
+    password_hash: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    last_seen_at: Mapped[datetime | None]
     is_active: Mapped[bool] = mapped_column(default=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
