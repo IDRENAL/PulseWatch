@@ -1,0 +1,19 @@
+[Unit]
+Description=PulseWatch monitoring agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pulsewatch
+Group=pulsewatch
+WorkingDirectory=/opt/pulsewatch
+EnvironmentFile=/etc/pulsewatch/agent.env
+ExecStart=/opt/pulsewatch/.venv/bin/python -m agent.agent
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
