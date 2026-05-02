@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -9,7 +9,9 @@ from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.server import Server
+from app.models.metric import Metric
 from app.schemas.server import ServerCreate, ServerRead, ServerWithKey
+from app.schemas.metric import MetricRead
 from app.core.security import hash_password
 
 router = APIRouter()
@@ -61,3 +63,31 @@ async def list_my_servers(
     result = await db.execute(query)
     servers = result.scalars().all()
     return servers
+
+
+@router.get("/{server_id}/metrics", response_model=list[MetricRead])
+async def list_server_metrics(
+    server_id: int,
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    server_query = select(Server).where(
+        Server.id == server_id,
+        Server.owner_id == current_user.id,
+    )
+    server = (await db.execute(server_query)).scalar_one_or_none()
+    if server is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found",
+        )
+
+    metrics_query = (
+        select(Metric)
+        .where(Metric.server_id == server_id)
+        .order_by(Metric.collected_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(metrics_query)
+    return result.scalars().all()
