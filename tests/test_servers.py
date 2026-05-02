@@ -115,3 +115,43 @@ async def test_my_servers_isolated_per_user(client: AsyncClient):
 async def test_my_servers_without_auth_returns_401(client: AsyncClient):
     response = await client.get("/servers/me")
     assert response.status_code == 401
+
+
+async def test_different_users_can_have_same_server_name(client: AsyncClient):
+    # alice
+    await client.post(
+        "/auth/register",
+        json={"email": "alice@example.com", "password": "secret123"},
+    )
+    alice_token = (
+        await client.post(
+            "/auth/login",
+            data={"username": "alice@example.com", "password": "secret123"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    ).json()["access_token"]
+    alice_resp = await client.post(
+        "/servers/register",
+        json={"name": "prod"},
+        headers={"Authorization": f"Bearer {alice_token}"},
+    )
+    assert alice_resp.status_code == 201
+
+    # bob — то же имя, но другой owner.
+    await client.post(
+        "/auth/register",
+        json={"email": "bob@example.com", "password": "secret456"},
+    )
+    bob_token = (
+        await client.post(
+            "/auth/login",
+            data={"username": "bob@example.com", "password": "secret456"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    ).json()["access_token"]
+    bob_resp = await client.post(
+        "/servers/register",
+        json={"name": "prod"},
+        headers={"Authorization": f"Bearer {bob_token}"},
+    )
+    assert bob_resp.status_code == 201

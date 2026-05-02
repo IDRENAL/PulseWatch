@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user
+from app.core.security import create_access_token, hash_password, verify_password
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import UserCreate, UserRead
-from app.core.security import hash_password
-from fastapi.security import OAuth2PasswordRequestForm
 from app.schemas.token import Token
-from app.core.security import verify_password, create_access_token
-from app.api.deps import get_current_user
+from app.schemas.user import UserCreate, UserRead
 
 router = APIRouter()
 
@@ -33,10 +34,17 @@ async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
         password_hash=hash_password(data.password),
     )
 
-    # 3. Сохраняем в БД
+    # 3. Сохраняем в БД (повторная проверка на гонке двух параллельных регистраций)
     db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)  # Чтобы получить id и другие поля от БД
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Пользователь с таким email уже существует",
+        )
+    await db.refresh(new_user)
 
     # 4. Возвращаем созданного юзера
     return new_user
