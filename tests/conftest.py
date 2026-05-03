@@ -9,6 +9,8 @@ from app.database import Base, get_db
 from app.main import app
 from app.models.user import User  # noqa: F401  -- регистрирует таблицу в Base.metadata
 from app.models.server import Server  # noqa: F401
+from app.models.metric import Metric  # noqa: F401
+from app.models.docker_metric import DockerMetric  # noqa: F401
 
 TEST_DB_NAME = "pulsewatch_test"
 TEST_DB_URL = (

@@ -10,8 +10,10 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.server import Server
 from app.models.metric import Metric
+from app.models.docker_metric import DockerMetric
 from app.schemas.server import ServerCreate, ServerRead, ServerWithKey
 from app.schemas.metric import MetricRead
+from app.schemas.docker_metric import DockerMetricRead
 from app.core.security import hash_password
 
 router = APIRouter()
@@ -89,5 +91,40 @@ async def list_server_metrics(
         .order_by(Metric.collected_at.desc())
         .limit(limit)
     )
+    result = await db.execute(metrics_query)
+    return result.scalars().all()
+
+
+@router.get(
+    "/{server_id}/docker-metrics",
+    response_model=list[DockerMetricRead],
+)
+async def list_server_docker_metrics(
+    server_id: int,
+    limit: int = Query(default=100, ge=1, le=1000),
+    container_id: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    server_query = select(Server).where(
+        Server.id == server_id,
+        Server.owner_id == current_user.id,
+    )
+    server = (await db.execute(server_query)).scalar_one_or_none()
+    if server is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found",
+        )
+
+    metrics_query = select(DockerMetric).where(DockerMetric.server_id == server_id)
+    if container_id is not None:
+        metrics_query = metrics_query.where(
+            DockerMetric.container_id == container_id
+        )
+    metrics_query = metrics_query.order_by(
+        DockerMetric.collected_at.desc()
+    ).limit(limit)
+
     result = await db.execute(metrics_query)
     return result.scalars().all()
