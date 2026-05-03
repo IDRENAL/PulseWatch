@@ -11,6 +11,7 @@ from app.database import Base
 from app.models import server   # noqa: F401 — import for side-effect: register Server in Base.metadata
 from app.models import user  # noqa: F401
 from app.models import metric  # noqa: F401
+from app.models import docker_metric  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -3,6 +3,7 @@ import signal
 
 from loguru import logger
 
+from agent.collectors.docker_collector import collect_docker_metrics
 from agent.collectors.system import collect_system_metrics
 from agent.config import settings
 from agent.sender import MetricsSender
@@ -18,7 +19,7 @@ async def run() -> None:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop_event.set)
+        loop.add_signal_handler(sig, stop_event.set)  # type: ignore[arg-type]
 
     logger.info(
         "PulseWatch agent запущен: {} (интервал {} c)",
@@ -28,10 +29,16 @@ async def run() -> None:
 
     try:
         while not stop_event.is_set():
-            payload = await asyncio.to_thread(collect_system_metrics)
-            ok = await sender.send(payload)
-            if ok:
-                logger.debug("Метрики отправлены: {}", payload)
+            system_payload = await asyncio.to_thread(collect_system_metrics)
+            if await sender.send(system_payload):
+                logger.debug("System-метрики отправлены: {}", system_payload)
+
+            docker_payload = await asyncio.to_thread(collect_docker_metrics)
+            if await sender.send_docker(docker_payload):
+                logger.debug(
+                    "Docker-метрики отправлены: {} контейнеров",
+                    len(docker_payload),
+                )
 
             try:
                 await asyncio.wait_for(
