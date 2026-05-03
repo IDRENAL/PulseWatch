@@ -77,3 +77,42 @@ async def verify_api_key(
         raise invalid_key_exc
 
     return server
+
+
+async def authenticate_ws_user(token: str | None, db: AsyncSession) -> User | None:
+    """JWT-аутентификация для WS. Возвращает None при любой ошибке (без HTTPException)."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token, settings.secret_key, algorithms=[settings.algorithm]
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
+            return None
+    except JWTError:
+        return None
+
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    return result.scalar_one_or_none()
+
+
+async def authenticate_ws_agent(
+    api_key: str | None, db: AsyncSession
+) -> Server | None:
+    """API-key аутентификация для WS. Возвращает None при любой ошибке."""
+    if not api_key:
+        return None
+    try:
+        server_id_str, secret = api_key.split(".", 1)
+        server_id = int(server_id_str)
+    except (ValueError, AttributeError):
+        return None
+
+    result = await db.execute(select(Server).where(Server.id == server_id))
+    server = result.scalar_one_or_none()
+    if server is None or not server.is_active:
+        return None
+    if not verify_password(secret, server.api_key_hash):
+        return None
+    return server
