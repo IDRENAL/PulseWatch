@@ -1,7 +1,8 @@
+import json
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -15,6 +16,7 @@ from app.schemas.server import ServerCreate, ServerRead, ServerWithKey
 from app.schemas.metric import MetricRead
 from app.schemas.docker_metric import DockerMetricRead
 from app.core.security import hash_password
+from app.redis_client import cache_dashboard, get_cached_dashboard
 
 router = APIRouter()
 
@@ -65,6 +67,69 @@ async def list_my_servers(
     result = await db.execute(query)
     servers = result.scalars().all()
     return servers
+
+
+@router.get("/dashboard")
+async def dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Сводная информация по всем серверам пользователя с последними метриками.
+    Результат кэшируется в Redis на 10 секунд.
+    """
+    cache_key = f"dashboard:{current_user.id}"
+
+    # Проверяем кэш
+    try:
+        cached = await get_cached_dashboard(current_user.id)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    # Запрашиваем серверы пользователя
+    servers_query = select(Server).where(Server.owner_id == current_user.id)
+    servers_result = await db.execute(servers_query)
+    servers = servers_result.scalars().all()
+
+    dashboard_data = []
+    for server in servers:
+        # Последняя системная метрика
+        latest_metric = (
+            await db.execute(
+                select(Metric)
+                .where(Metric.server_id == server.id)
+                .order_by(Metric.collected_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        server_info = {
+            "id": server.id,
+            "name": server.name,
+            "is_active": server.is_active,
+            "last_seen_at": server.last_seen_at.isoformat() if server.last_seen_at else None,
+            "latest_metric": None,
+        }
+
+        if latest_metric:
+            server_info["latest_metric"] = {
+                "cpu_percent": latest_metric.cpu_percent,
+                "memory_percent": latest_metric.memory_percent,
+                "disk_percent": latest_metric.disk_percent,
+                "collected_at": latest_metric.collected_at.isoformat(),
+            }
+
+        dashboard_data.append(server_info)
+
+    # Кэшируем результат
+    try:
+        await cache_dashboard(current_user.id, json.dumps(dashboard_data), ttl=10)
+    except Exception:
+        pass
+
+    return dashboard_data
 
 
 @router.get("/{server_id}/metrics", response_model=list[MetricRead])
