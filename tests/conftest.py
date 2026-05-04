@@ -15,6 +15,10 @@ from app.models.user import User  # noqa: F401  -- регистрирует та
 from app.models.server import Server  # noqa: F401
 from app.models.metric import Metric  # noqa: F401
 from app.models.docker_metric import DockerMetric  # noqa: F401
+from app.models.metric_aggregate import MetricAggregate  # noqa: F401
+from app.models.docker_aggregate import DockerAggregate  # noqa: F401
+from app.models.alert_rule import AlertRule  # noqa: F401
+from app.models.alert_event import AlertEvent  # noqa: F401
 
 TEST_DB_NAME = "pulsewatch_test"
 TEST_DB_URL = (
@@ -110,3 +114,11 @@ async def auth_headers(client: AsyncClient):
     )
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def db_session(test_engine):
+    """Реальная асинхронная сессия БД для прямых вызовов сервисного слоя."""
+    test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with test_session_maker() as session:
+        yield session

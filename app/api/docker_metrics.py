@@ -8,6 +8,7 @@ from app.models.docker_metric import DockerMetric
 from app.models.server import Server
 from app.redis_client import publish_docker_metric
 from app.schemas.docker_metric import DockerMetricCreate
+from app.services.threshold import evaluate_docker_metrics
 
 router = APIRouter()
 
@@ -26,6 +27,22 @@ async def submit_docker_metrics(
     server.last_seen_at = func.now()
 
     await db.commit()
+
+    # Проверяем docker-метрики против пороговых правил
+    try:
+        for item in data:
+            await evaluate_docker_metrics(
+                db,
+                server_id=server.id,
+                container_name=item.container_name,
+                container_data={
+                    "cpu_percent": item.cpu_percent,
+                    "memory_usage_mb": item.memory_usage_mb,
+                    "memory_limit_mb": item.memory_limit_mb,
+                },
+            )
+    except Exception:
+        pass  # Alert evaluation failure не должен блокировать приём метрик
 
     # Публикуем Docker-метрики в Redis Pub/Sub для real-time дашборда
     try:

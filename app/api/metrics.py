@@ -1,5 +1,3 @@
-import json
-
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +8,7 @@ from app.models.metric import Metric
 from app.models.server import Server
 from app.redis_client import publish_metric
 from app.schemas.metric import MetricCreate
+from app.services.threshold import evaluate_system_metrics
 
 router = APIRouter()
 
@@ -32,6 +31,20 @@ async def submit_metric(
 
     await db.commit()
     await db.refresh(new_metric)
+
+    # Проверяем метрики против пороговых правил
+    try:
+        await evaluate_system_metrics(
+            db,
+            server_id=server.id,
+            metric_data={
+                "cpu_percent": new_metric.cpu_percent,
+                "memory_percent": new_metric.memory_percent,
+                "disk_percent": new_metric.disk_percent,
+            },
+        )
+    except Exception:
+        pass  # Alert evaluation failure не должен блокировать приём метрик
 
     # Публикуем метрику в Redis Pub/Sub для real-time дашборда
     try:
