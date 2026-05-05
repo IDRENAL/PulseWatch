@@ -30,9 +30,7 @@ async def publish_metric(server_id: int, data: dict) -> None:
 async def publish_docker_metric(server_id: int, data: list[dict]) -> None:
     """Публикует Docker-метрики в Redis-канал docker_metrics:{server_id}."""
     r = _get_app_redis()
-    payload = json.dumps(
-        {"type": "docker_metric", "server_id": server_id, "containers": data}
-    )
+    payload = json.dumps({"type": "docker_metric", "server_id": server_id, "containers": data})
     await r.publish(f"docker_metrics:{server_id}", payload)
 
 

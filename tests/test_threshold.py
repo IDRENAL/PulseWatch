@@ -1,9 +1,10 @@
 """Тесты сервиса оценки пороговых значений."""
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.models.alert_rule import ThresholdOperator
-from app.services.threshold import _compare, evaluate_system_metrics, evaluate_docker_metrics
+from app.services.threshold import _compare, evaluate_docker_metrics, evaluate_system_metrics
 
 
 def _make_db_mock() -> AsyncMock:
@@ -59,9 +60,7 @@ async def test_evaluate_system_metrics_triggers():
     db.execute.return_value = scalars_mock
 
     with patch("app.services.threshold.publish_alert", new_callable=AsyncMock):
-        events = await evaluate_system_metrics(
-            db, server_id=1, metric_data={"cpu_percent": 95.0}
-        )
+        events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 95.0})
 
     assert len(events) == 1
     assert events[0].metric_value == 95.0
@@ -79,9 +78,7 @@ async def test_evaluate_system_metrics_no_trigger():
     scalars_mock = _make_scalars_mock([mock_rule])
     db.execute.return_value = scalars_mock
 
-    events = await evaluate_system_metrics(
-        db, server_id=1, metric_data={"cpu_percent": 80.0}
-    )
+    events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 80.0})
 
     assert len(events) == 0
     db.add.assert_not_called()
@@ -96,14 +93,12 @@ async def test_evaluate_system_metrics_cooldown():
         threshold_value=90.0,
         operator=ThresholdOperator.gt,
         cooldown_seconds=300,
-        last_triggered_at=datetime.now(timezone.utc),
+        last_triggered_at=datetime.now(UTC),
     )
     scalars_mock = _make_scalars_mock([mock_rule])
     db.execute.return_value = scalars_mock
 
-    events = await evaluate_system_metrics(
-        db, server_id=1, metric_data={"cpu_percent": 95.0}
-    )
+    events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 95.0})
 
     assert len(events) == 0
     db.add.assert_not_called()
@@ -117,15 +112,13 @@ async def test_evaluate_system_metrics_cooldown_expired():
         threshold_value=90.0,
         operator=ThresholdOperator.gt,
         cooldown_seconds=300,
-        last_triggered_at=datetime.now(timezone.utc) - timedelta(seconds=600),
+        last_triggered_at=datetime.now(UTC) - timedelta(seconds=600),
     )
     scalars_mock = _make_scalars_mock([mock_rule])
     db.execute.return_value = scalars_mock
 
     with patch("app.services.threshold.publish_alert", new_callable=AsyncMock):
-        events = await evaluate_system_metrics(
-            db, server_id=1, metric_data={"cpu_percent": 95.0}
-        )
+        events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 95.0})
 
     assert len(events) == 1
 
@@ -139,9 +132,7 @@ async def test_evaluate_system_metrics_inactive_rule():
     scalars_mock = _make_scalars_mock([])
     db.execute.return_value = scalars_mock
 
-    events = await evaluate_system_metrics(
-        db, server_id=1, metric_data={"cpu_percent": 95.0}
-    )
+    events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 95.0})
 
     assert len(events) == 0
 
@@ -159,9 +150,7 @@ async def test_evaluate_system_metrics_missing_field():
     scalars_mock = _make_scalars_mock([mock_rule])
     db.execute.return_value = scalars_mock
 
-    events = await evaluate_system_metrics(
-        db, server_id=1, metric_data={"memory_percent": 95.0}
-    )
+    events = await evaluate_system_metrics(db, server_id=1, metric_data={"memory_percent": 95.0})
 
     assert len(events) == 0
     db.add.assert_not_called()

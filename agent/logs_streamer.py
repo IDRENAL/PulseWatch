@@ -34,9 +34,7 @@ class LogsStreamer:
             except asyncio.CancelledError:
                 raise
             except (ConnectionClosed, OSError) as exc:
-                logger.warning(
-                    "WS логов оборвался: {} — реконнект через {}c", exc, backoff
-                )
+                logger.warning("WS логов оборвался: {} — реконнект через {}c", exc, backoff)
             except Exception as exc:
                 logger.warning(
                     "WS логов: непредвиденная ошибка {} — реконнект через {}c",
@@ -48,7 +46,7 @@ class LogsStreamer:
                 break
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=backoff)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             backoff = min(backoff * 2, self._max_backoff)
 

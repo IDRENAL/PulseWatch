@@ -1,8 +1,5 @@
 """Тесты для Этапа 4: WebSocket real-time метрик через Redis Pub/Sub + Dashboard."""
 
-import json
-import time
-
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -61,9 +58,7 @@ def test_ws_metrics_with_foreign_server_closes_1008(sync_client: TestClient):
     bob_token = _register_user(sync_client, "bob@example.com", "secret456")
 
     with pytest.raises(WebSocketDisconnect) as exc:
-        with sync_client.websocket_connect(
-            f"/ws/metrics/{alice_server['id']}?token={bob_token}"
-        ):
+        with sync_client.websocket_connect(f"/ws/metrics/{alice_server['id']}?token={bob_token}"):
             pass
     assert exc.value.code == 1008
 
@@ -73,9 +68,7 @@ def test_ws_metrics_valid_connection_accepted(sync_client: TestClient):
     token = _register_user(sync_client, "alice@example.com", "secret123")
     server = _register_server(sync_client, token, "srv-01")
 
-    with sync_client.websocket_connect(
-        f"/ws/metrics/{server['id']}?token={token}"
-    ) as ws:
+    with sync_client.websocket_connect(f"/ws/metrics/{server['id']}?token={token}") as ws:
         # Если подключение установлено — можно отправить ping-сообщение
         ws.send_text("ping")
         # WS остаётся открытым, никаких исключений
@@ -109,9 +102,7 @@ def test_ws_docker_metrics_valid_connection_accepted(sync_client: TestClient):
     token = _register_user(sync_client, "alice@example.com", "secret123")
     server = _register_server(sync_client, token, "srv-01")
 
-    with sync_client.websocket_connect(
-        f"/ws/docker-metrics/{server['id']}?token={token}"
-    ) as ws:
+    with sync_client.websocket_connect(f"/ws/docker-metrics/{server['id']}?token={token}") as ws:
         ws.send_text("ping")
 
 
@@ -125,9 +116,7 @@ async def test_dashboard_returns_empty_list_for_new_user(client, auth_headers):
     assert response.json() == []
 
 
-async def test_dashboard_returns_server_with_latest_metric(
-    client, auth_headers
-):
+async def test_dashboard_returns_server_with_latest_metric(client, auth_headers):
     """Дашборд содержит последний снэпшот системных метрик."""
     # Создаём сервер
     server_resp = await client.post(
@@ -159,9 +148,7 @@ async def test_dashboard_returns_server_with_latest_metric(
     assert data[0]["latest_metric"]["disk_percent"] == 77.7
 
 
-async def test_dashboard_server_without_metrics_has_none(
-    client, auth_headers
-):
+async def test_dashboard_server_without_metrics_has_none(client, auth_headers):
     """Сервер без метрик — latest_metric == None."""
     server_resp = await client.post(
         "/servers/register",

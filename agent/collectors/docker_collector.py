@@ -22,11 +22,7 @@ def _calculate_cpu_percent(stats: dict) -> float:
     presystem_cpu = precpu_stats.get("system_cpu_usage", 0)
     system_delta = system_cpu - presystem_cpu
 
-    online_cpus = (
-        cpu_stats.get("online_cpus")
-        or len(cpu_usage.get("percpu_usage") or [])
-        or 1
-    )
+    online_cpus = cpu_stats.get("online_cpus") or len(cpu_usage.get("percpu_usage") or []) or 1
 
     if system_delta <= 0 or cpu_delta < 0:
         return 0.0
@@ -67,7 +63,9 @@ def _collect_one(container: Container) -> dict:
         }
 
     # stream=False обязательно — иначе stats() возвращает генератор и зависает.
-    stats = container.stats(stream=False)
+    # cast: docker stub типизирует stats() как Iterator | dict, но при stream=False
+    # это всегда dict.
+    stats: dict = container.stats(stream=False)  # type: ignore[assignment]
     cpu_percent = _calculate_cpu_percent(stats)
     memory_stats = stats.get("memory_stats", {}) or {}
     memory_usage_bytes = memory_stats.get("usage", 0) or 0
@@ -102,9 +100,7 @@ def collect_docker_metrics() -> list[dict]:
         try:
             metrics.append(_collect_one(container))
         except DockerException as exc:
-            logger.warning(
-                "Сбой при сборе метрик контейнера {}: {}", container.short_id, exc
-            )
+            logger.warning("Сбой при сборе метрик контейнера {}: {}", container.short_id, exc)
 
     client.close()
     return metrics

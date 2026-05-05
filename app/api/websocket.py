@@ -25,9 +25,7 @@ async def ws_dashboard_logs(
         await websocket.close(code=WS_POLICY_VIOLATION)
         return
 
-    server_query = select(Server).where(
-        Server.id == server_id, Server.owner_id == user.id
-    )
+    server_query = select(Server).where(Server.id == server_id, Server.owner_id == user.id)
     server = (await db.execute(server_query)).scalar_one_or_none()
     if server is None:
         await websocket.close(code=WS_POLICY_VIOLATION)

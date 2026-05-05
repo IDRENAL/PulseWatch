@@ -1,15 +1,11 @@
 """Тесты API событий алертов."""
+
 import pytest_asyncio
 from httpx import AsyncClient
 
-from app.models.alert_event import AlertEvent
-from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
-
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     response = await client.post(
         "/servers/register",
         json={"name": "web-prod-01"},
@@ -19,9 +15,7 @@ async def server_with_key(
     return response.json()
 
 
-async def test_list_alert_events_empty(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_list_alert_events_empty(client: AsyncClient, auth_headers: dict[str, str]):
     response = await client.get("/alerts/events", headers=auth_headers)
     assert response.status_code == 200
     assert response.json() == []
@@ -125,9 +119,7 @@ async def test_list_alert_events_filter_by_server(
     )
 
     # Фильтрация по server_id
-    response = await client.get(
-        f"/alerts/events?server_id={server_id}", headers=auth_headers
-    )
+    response = await client.get(f"/alerts/events?server_id={server_id}", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) >= 1
@@ -178,9 +170,7 @@ async def test_list_alert_events_filter_by_rule(
     )
 
     # Фильтрация по rule_id
-    response = await client.get(
-        f"/alerts/events?rule_id={rule1['id']}", headers=auth_headers
-    )
+    response = await client.get(f"/alerts/events?rule_id={rule1['id']}", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) >= 1
@@ -214,24 +204,18 @@ async def test_get_alert_event(
     )
 
     # Получаем список событий для нахождения event_id
-    events = (
-        await client.get("/alerts/events", headers=auth_headers)
-    ).json()
+    events = (await client.get("/alerts/events", headers=auth_headers)).json()
     assert len(events) >= 1
     event_id = events[0]["id"]
 
     # Получаем конкретное событие
-    response = await client.get(
-        f"/alerts/events/{event_id}", headers=auth_headers
-    )
+    response = await client.get(f"/alerts/events/{event_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["id"] == event_id
     assert response.json()["metric_value"] == 95.0
 
 
-async def test_get_alert_event_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_get_alert_event_not_found(client: AsyncClient, auth_headers: dict[str, str]):
     response = await client.get("/alerts/events/9999", headers=auth_headers)
     assert response.status_code == 404
 
@@ -281,9 +265,7 @@ async def test_alert_events_isolation(client: AsyncClient):
     )
 
     # Alice видит своё событие
-    alice_events = (
-        await client.get("/alerts/events", headers=alice_headers)
-    ).json()
+    alice_events = (await client.get("/alerts/events", headers=alice_headers)).json()
     assert len(alice_events) >= 1
 
     # Bob регистрируется, не видит событий
@@ -300,14 +282,10 @@ async def test_alert_events_isolation(client: AsyncClient):
     ).json()["access_token"]
     bob_headers = {"Authorization": f"Bearer {bob_token}"}
 
-    bob_events = (
-        await client.get("/alerts/events", headers=bob_headers)
-    ).json()
+    bob_events = (await client.get("/alerts/events", headers=bob_headers)).json()
     assert bob_events == []
 
     # Bob не может напрямую получить событие Alice
     alice_event_id = alice_events[0]["id"]
-    response = await client.get(
-        f"/alerts/events/{alice_event_id}", headers=bob_headers
-    )
+    response = await client.get(f"/alerts/events/{alice_event_id}", headers=bob_headers)
     assert response.status_code == 404

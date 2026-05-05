@@ -3,9 +3,7 @@ from httpx import AsyncClient
 
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     response = await client.post(
         "/servers/register",
         json={"name": "web-prod-01"},
@@ -15,9 +13,7 @@ async def server_with_key(
     return response.json()
 
 
-async def test_submit_metric_with_valid_key_returns_201(
-    client: AsyncClient, server_with_key: dict
-):
+async def test_submit_metric_with_valid_key_returns_201(client: AsyncClient, server_with_key: dict):
     response = await client.post(
         "/metrics",
         json={"cpu_percent": 12.5, "memory_percent": 47.0, "disk_percent": 30.1},
@@ -82,9 +78,7 @@ async def test_get_metrics_returns_in_descending_order(
         r = await client.post("/metrics", json=p, headers={"X-API-Key": api_key})
         assert r.status_code == 201
 
-    response = await client.get(
-        f"/servers/{server_id}/metrics", headers=auth_headers
-    )
+    response = await client.get(f"/servers/{server_id}/metrics", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 3
@@ -113,9 +107,7 @@ async def test_get_metrics_respects_limit(
             headers={"X-API-Key": api_key},
         )
 
-    response = await client.get(
-        f"/servers/{server_id}/metrics?limit=2", headers=auth_headers
-    )
+    response = await client.get(f"/servers/{server_id}/metrics?limit=2", headers=auth_headers)
     assert response.status_code == 200
     assert len(response.json()) == 2
 
@@ -126,14 +118,10 @@ async def test_get_metrics_limit_validation(
     server_with_key: dict,
 ):
     server_id = server_with_key["id"]
-    response = await client.get(
-        f"/servers/{server_id}/metrics?limit=0", headers=auth_headers
-    )
+    response = await client.get(f"/servers/{server_id}/metrics?limit=0", headers=auth_headers)
     assert response.status_code == 422
 
-    response = await client.get(
-        f"/servers/{server_id}/metrics?limit=10000", headers=auth_headers
-    )
+    response = await client.get(f"/servers/{server_id}/metrics?limit=10000", headers=auth_headers)
     assert response.status_code == 422
 
 
@@ -181,9 +169,7 @@ async def test_get_metrics_foreign_server_returns_404(client: AsyncClient):
     ).json()["access_token"]
     bob_headers = {"Authorization": f"Bearer {bob_token}"}
 
-    response = await client.get(
-        f"/servers/{alice_server['id']}/metrics", headers=bob_headers
-    )
+    response = await client.get(f"/servers/{alice_server['id']}/metrics", headers=bob_headers)
     # 404, не 403 — защита от энумерации id.
     assert response.status_code == 404
 

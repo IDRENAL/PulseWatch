@@ -11,9 +11,7 @@ class MetricsSender:
     async def _post(self, path: str, payload) -> bool:
         url = f"{self._base_url}{path}"
         try:
-            response = await self._client.post(
-                url, json=payload, headers=self._headers
-            )
+            response = await self._client.post(url, json=payload, headers=self._headers)
         except httpx.HTTPError as exc:
             logger.warning("Сетевая ошибка при POST {}: {}", path, exc)
             return False

@@ -4,21 +4,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.database import get_db
-from app.models.alert_rule import AlertRule
 from app.models.alert_event import AlertEvent
+from app.models.alert_rule import AlertRule
 from app.models.server import Server
 from app.models.user import User
-from app.schemas.alert_rule import AlertRuleCreate, AlertRuleUpdate, AlertRuleRead
 from app.schemas.alert_event import AlertEventRead
+from app.schemas.alert_rule import AlertRuleCreate, AlertRuleRead, AlertRuleUpdate
 
 router = APIRouter()
 
 
 async def _verify_server_owner(server_id: int, user: User, db: AsyncSession) -> Server:
     """Проверяет что сервер существует и принадлежит пользователю."""
-    server = (await db.execute(
-        select(Server).where(Server.id == server_id, Server.owner_id == user.id)
-    )).scalar_one_or_none()
+    server = (
+        await db.execute(select(Server).where(Server.id == server_id, Server.owner_id == user.id))
+    ).scalar_one_or_none()
     if server is None:
         raise HTTPException(status_code=404, detail="Server not found")
     return server
@@ -72,9 +72,11 @@ async def get_alert_rule(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rule = (await db.execute(
-        select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    rule = (
+        await db.execute(
+            select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     return rule
@@ -88,9 +90,11 @@ async def update_alert_rule(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rule = (await db.execute(
-        select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    rule = (
+        await db.execute(
+            select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
 
@@ -110,9 +114,11 @@ async def delete_alert_rule(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rule = (await db.execute(
-        select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    rule = (
+        await db.execute(
+            select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     await db.delete(rule)
@@ -149,11 +155,13 @@ async def get_alert_event(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    event = (await db.execute(
-        select(AlertEvent)
-        .join(AlertRule, AlertEvent.rule_id == AlertRule.id)
-        .where(AlertEvent.id == event_id, AlertRule.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    event = (
+        await db.execute(
+            select(AlertEvent)
+            .join(AlertRule, AlertEvent.rule_id == AlertRule.id)
+            .where(AlertEvent.id == event_id, AlertRule.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Alert event not found")
     return event

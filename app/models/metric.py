@@ -18,6 +18,4 @@ class Metric(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_metrics_server_id_collected_at", "server_id", "collected_at"),
-    )
+    __table_args__ = (Index("ix_metrics_server_id_collected_at", "server_id", "collected_at"),)

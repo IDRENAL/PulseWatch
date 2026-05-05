@@ -57,9 +57,7 @@ def test_dashboard_ws_with_foreign_server_closes_1008(sync_client: TestClient):
     bob_token = _register_user(sync_client, "bob@example.com", "secret456")
 
     with pytest.raises(WebSocketDisconnect) as exc:
-        with sync_client.websocket_connect(
-            f"/ws/logs/{alice_server['id']}?token={bob_token}"
-        ):
+        with sync_client.websocket_connect(f"/ws/logs/{alice_server['id']}?token={bob_token}"):
             pass
     assert exc.value.code == 1008
 
@@ -83,9 +81,7 @@ def test_agent_ws_with_wrong_secret_closes_1008(sync_client: TestClient):
     server = _register_server(sync_client, token, "web-prod-01")
 
     with pytest.raises(WebSocketDisconnect) as exc:
-        with sync_client.websocket_connect(
-            f"/ws/agent/logs?api_key={server['id']}.totally-wrong"
-        ):
+        with sync_client.websocket_connect(f"/ws/agent/logs?api_key={server['id']}.totally-wrong"):
             pass
     assert exc.value.code == 1008
 
@@ -96,14 +92,10 @@ def test_agent_to_dashboard_broadcast_happy_path(sync_client: TestClient):
     server_id = server["id"]
     api_key = server["api_key"]
 
-    with sync_client.websocket_connect(
-        f"/ws/logs/{server_id}?token={token}"
-    ) as dashboard:
+    with sync_client.websocket_connect(f"/ws/logs/{server_id}?token={token}") as dashboard:
         # Дать серверной корутине дописать `manager.subscribe(...)` после accept().
         time.sleep(0.05)
-        with sync_client.websocket_connect(
-            f"/ws/agent/logs?api_key={api_key}"
-        ) as agent:
+        with sync_client.websocket_connect(f"/ws/agent/logs?api_key={api_key}") as agent:
             agent.send_text("hello from journald")
             assert dashboard.receive_text() == "hello from journald"
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ async def evaluate_system_metrics(
     )
     rules = rules_result.scalars().all()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Список кортежей (event, rule) для корректной публикации
     pending: list[tuple[AlertEvent, AlertRule]] = []
 
@@ -111,7 +111,7 @@ async def evaluate_docker_metrics(
     )
     rules = rules_result.scalars().all()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Список кортежей (event, rule) для корректной публикации
     pending: list[tuple[AlertEvent, AlertRule]] = []
 

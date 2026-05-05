@@ -37,6 +37,9 @@ htmlcov/
 *.swo
 .DS_Store
 
+# Claude Code (локальный конфиг агента)
+.claude/
+
 # Docker
 *.pid
 

@@ -17,9 +17,7 @@ def _container_payload(name: str = "pulsewatch_db", **overrides) -> dict:
 
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     response = await client.post(
         "/servers/register",
         json={"name": "web-prod-01"},
@@ -42,15 +40,17 @@ async def test_submit_docker_metrics_with_valid_key_returns_201(
     assert response.json() == {"status": "ok", "count": 1}
 
 
-async def test_submit_docker_metrics_batch(
-    client: AsyncClient, server_with_key: dict
-):
+async def test_submit_docker_metrics_batch(client: AsyncClient, server_with_key: dict):
     payload = [
         _container_payload(name="pulsewatch_db", container_id="aaa"),
         _container_payload(name="pulsewatch_redis", container_id="bbb"),
         _container_payload(
-            name="nsam_db", container_id="ccc", status="exited",
-            cpu_percent=0.0, memory_usage_mb=0.0, memory_limit_mb=None,
+            name="nsam_db",
+            container_id="ccc",
+            status="exited",
+            cpu_percent=0.0,
+            memory_usage_mb=0.0,
+            memory_limit_mb=None,
         ),
     ]
     response = await client.post(
@@ -165,9 +165,7 @@ async def test_get_docker_metrics_returns_in_descending_order(
             headers={"X-API-Key": api_key},
         )
 
-    response = await client.get(
-        f"/servers/{server_id}/docker-metrics", headers=auth_headers
-    )
+    response = await client.get(f"/servers/{server_id}/docker-metrics", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 3
@@ -185,12 +183,8 @@ async def test_get_docker_metrics_respects_limit(
     server_id = server_with_key["id"]
 
     # Один батч с 5 контейнерами = 5 строк в БД.
-    payload = [
-        _container_payload(name=f"c{i}", container_id=f"id{i}") for i in range(5)
-    ]
-    await client.post(
-        "/docker-metrics", json=payload, headers={"X-API-Key": api_key}
-    )
+    payload = [_container_payload(name=f"c{i}", container_id=f"id{i}") for i in range(5)]
+    await client.post("/docker-metrics", json=payload, headers={"X-API-Key": api_key})
 
     response = await client.get(
         f"/servers/{server_id}/docker-metrics?limit=2", headers=auth_headers
@@ -212,9 +206,7 @@ async def test_get_docker_metrics_filter_by_container_id(
         _container_payload(name="redis", container_id="redis-id"),
         _container_payload(name="app", container_id="app-id"),
     ]
-    await client.post(
-        "/docker-metrics", json=payload, headers={"X-API-Key": api_key}
-    )
+    await client.post("/docker-metrics", json=payload, headers={"X-API-Key": api_key})
 
     response = await client.get(
         f"/servers/{server_id}/docker-metrics?container_id=redis-id",
@@ -246,9 +238,7 @@ async def test_get_docker_metrics_limit_validation(
 async def test_get_docker_metrics_unknown_server_returns_404(
     client: AsyncClient, auth_headers: dict[str, str]
 ):
-    response = await client.get(
-        "/servers/9999/docker-metrics", headers=auth_headers
-    )
+    response = await client.get("/servers/9999/docker-metrics", headers=auth_headers)
     assert response.status_code == 404
 
 

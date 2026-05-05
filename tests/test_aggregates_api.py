@@ -1,5 +1,6 @@
 """Тесты API агрегированных метрик."""
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
 from httpx import AsyncClient
@@ -7,15 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metric_aggregate import PeriodType
 from app.services.aggregation import (
-    aggregate_system_metrics,
     aggregate_docker_metrics,
+    aggregate_system_metrics,
 )
 
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     """Создаёт сервер и возвращает его данные с api_key."""
     response = await client.post(
         "/servers/register",
@@ -59,13 +58,11 @@ async def _create_system_aggregate(
             headers={"X-API-Key": api_key},
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
-    await aggregate_system_metrics(
-        db_session, server_id, period_type, period_start, period_end
-    )
+    await aggregate_system_metrics(db_session, server_id, period_type, period_start, period_end)
 
 
 async def _create_docker_aggregate(
@@ -83,15 +80,10 @@ async def _create_docker_aggregate(
 
     # Создаём сырые docker-метрики
     for _ in range(3):
-        payload = [
-            _container_payload(name=name, container_id=f"id-{name}")
-            for name in containers
-        ]
-        await client.post(
-            "/docker-metrics", json=payload, headers={"X-API-Key": api_key}
-        )
+        payload = [_container_payload(name=name, container_id=f"id-{name}") for name in containers]
+        await client.post("/docker-metrics", json=payload, headers={"X-API-Key": api_key})
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -256,9 +248,7 @@ async def test_get_docker_aggregates_filter_container(
     """GET агрегированных docker-метрик с фильтром по container_name."""
     server_id = server_with_key["id"]
 
-    await _create_docker_aggregate(
-        client, db_session, server_with_key, containers=["db", "redis"]
-    )
+    await _create_docker_aggregate(client, db_session, server_with_key, containers=["db", "redis"])
 
     # Фильтр по container_name=db — только один агрегат
     response = await client.get(

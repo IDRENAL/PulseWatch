@@ -5,17 +5,19 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import app.models.docker_aggregate  # noqa: F401
+import app.models.metric_aggregate  # noqa: F401
 from alembic import context
 from app.config import settings
 from app.database import Base
-from app.models import server   # noqa: F401 — import for side-effect: register Server in Base.metadata
-from app.models import user  # noqa: F401
-from app.models import metric  # noqa: F401
-from app.models import docker_metric  # noqa: F401
-from app.models import alert_rule  # noqa: F401
-from app.models import alert_event  # noqa: F401
-import app.models.metric_aggregate  # noqa: F401
-import app.models.docker_aggregate  # noqa: F401
+from app.models import (
+    alert_event,  # noqa: F401
+    alert_rule,  # noqa: F401
+    docker_metric,  # noqa: F401
+    metric,  # noqa: F401
+    server,  # noqa: F401 — import for side-effect: register Server in Base.metadata
+    user,  # noqa: F401
+)
 
 # Это объект конфигурации Alembic, предоставляющий
 # доступ к значениям из используемого .ini файла.

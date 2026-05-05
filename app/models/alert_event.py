@@ -19,6 +19,4 @@ class AlertEvent(Base):
     metric_value: Mapped[float] = mapped_column(Float, nullable=False)
     threshold_value: Mapped[float] = mapped_column(Float, nullable=False)
     message: Mapped[str] = mapped_column(String(500), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

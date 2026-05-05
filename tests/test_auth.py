@@ -61,9 +61,7 @@ async def test_login_unknown_user_returns_401(client: AsyncClient):
     assert response.status_code == 401
 
 
-async def test_me_with_valid_token_returns_user(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_me_with_valid_token_returns_user(client: AsyncClient, auth_headers: dict[str, str]):
     response = await client.get("/auth/me", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
@@ -76,7 +74,5 @@ async def test_me_without_token_returns_401(client: AsyncClient):
 
 
 async def test_me_with_broken_token_returns_401(client: AsyncClient):
-    response = await client.get(
-        "/auth/me", headers={"Authorization": "Bearer not.a.real.jwt"}
-    )
+    response = await client.get("/auth/me", headers={"Authorization": "Bearer not.a.real.jwt"})
     assert response.status_code == 401
