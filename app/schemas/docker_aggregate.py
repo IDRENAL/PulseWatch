@@ -7,6 +7,7 @@ from app.models.metric_aggregate import PeriodType
 
 class DockerAggregateRead(BaseModel):
     """Чтение агрегированных Docker-метрик."""
+
     id: int
     server_id: int
     container_name: str

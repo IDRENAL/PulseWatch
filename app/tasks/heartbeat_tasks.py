@@ -1,6 +1,7 @@
 """Задача мониторинга heartbeat серверов."""
+
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
@@ -18,11 +19,12 @@ def task_check_heartbeat() -> None:
 
 async def _run_heartbeat_check() -> None:
     """Внутренняя async-функция проверки heartbeat."""
+    from sqlalchemy import update
+
     from app.database import async_session_factory
     from app.models.server import Server
-    from sqlalchemy import select, update
 
-    threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
+    threshold = datetime.now(UTC) - timedelta(minutes=5)
 
     async with async_session_factory() as db:
         # Помечаем неактивные серверы

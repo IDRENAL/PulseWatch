@@ -3,24 +3,25 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.api.deps import get_current_user
-from app.models.user import User
-from app.models.server import Server
-from app.models.metric import Metric
-from app.models.docker_metric import DockerMetric
-from app.schemas.server import ServerCreate, ServerRead, ServerWithKey
-from app.schemas.metric import MetricRead
-from app.schemas.docker_metric import DockerMetricRead
-from app.schemas.metric_aggregate import MetricAggregateRead
-from app.schemas.docker_aggregate import DockerAggregateRead
-from app.models.metric_aggregate import MetricAggregate, PeriodType as AggregatePeriodType
-from app.models.docker_aggregate import DockerAggregate
 from app.core.security import hash_password
+from app.database import get_db
+from app.models.docker_aggregate import DockerAggregate
+from app.models.docker_metric import DockerMetric
+from app.models.metric import Metric
+from app.models.metric_aggregate import MetricAggregate
+from app.models.metric_aggregate import PeriodType as AggregatePeriodType
+from app.models.server import Server
+from app.models.user import User
 from app.redis_client import cache_dashboard, get_cached_dashboard
+from app.schemas.docker_aggregate import DockerAggregateRead
+from app.schemas.docker_metric import DockerMetricRead
+from app.schemas.metric import MetricRead
+from app.schemas.metric_aggregate import MetricAggregateRead
+from app.schemas.server import ServerCreate, ServerRead, ServerWithKey
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ async def register_server(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Сервер с таким именем уже существует",
-        )
+        ) from None
     await db.refresh(new_server)
 
     api_key = f"{new_server.id}.{secret}"
@@ -82,8 +83,6 @@ async def dashboard(
     Сводная информация по всем серверам пользователя с последними метриками.
     Результат кэшируется в Redis на 10 секунд.
     """
-    cache_key = f"dashboard:{current_user.id}"
-
     # Проверяем кэш
     try:
         cached = await get_cached_dashboard(current_user.id)
@@ -101,10 +100,14 @@ async def dashboard(
     server_ids = [s.id for s in servers]
     latest_metrics: dict[int, dict] = {}
     if server_ids:
-        rn = func.row_number().over(
-            partition_by=Metric.server_id,
-            order_by=Metric.collected_at.desc(),
-        ).label("rn")
+        rn = (
+            func.row_number()
+            .over(
+                partition_by=Metric.server_id,
+                order_by=Metric.collected_at.desc(),
+            )
+            .label("rn")
+        )
         subq = (
             select(
                 Metric.server_id,
@@ -167,9 +170,11 @@ async def get_system_aggregates(
     db: AsyncSession = Depends(get_db),
 ):
     """Возвращает агрегированные системные метрики сервера."""
-    server = (await db.execute(
-        select(Server).where(Server.id == server_id, Server.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    server = (
+        await db.execute(
+            select(Server).where(Server.id == server_id, Server.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if server is None:
         raise HTTPException(status_code=404, detail="Сервер не найден")
 
@@ -195,18 +200,17 @@ async def get_docker_aggregates(
     db: AsyncSession = Depends(get_db),
 ):
     """Возвращает агрегированные Docker-метрики сервера."""
-    server = (await db.execute(
-        select(Server).where(Server.id == server_id, Server.owner_id == current_user.id)
-    )).scalar_one_or_none()
+    server = (
+        await db.execute(
+            select(Server).where(Server.id == server_id, Server.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
     if server is None:
         raise HTTPException(status_code=404, detail="Сервер не найден")
 
-    query = (
-        select(DockerAggregate)
-        .where(
-            DockerAggregate.server_id == server_id,
-            DockerAggregate.period_type == period,
-        )
+    query = select(DockerAggregate).where(
+        DockerAggregate.server_id == server_id,
+        DockerAggregate.period_type == period,
     )
     if container_name is not None:
         query = query.where(DockerAggregate.container_name == container_name)
@@ -268,12 +272,8 @@ async def list_server_docker_metrics(
 
     metrics_query = select(DockerMetric).where(DockerMetric.server_id == server_id)
     if container_id is not None:
-        metrics_query = metrics_query.where(
-            DockerMetric.container_id == container_id
-        )
-    metrics_query = metrics_query.order_by(
-        DockerMetric.collected_at.desc()
-    ).limit(limit)
+        metrics_query = metrics_query.where(DockerMetric.container_id == container_id)
+    metrics_query = metrics_query.order_by(DockerMetric.collected_at.desc()).limit(limit)
 
     result = await db.execute(metrics_query)
     return result.scalars().all()

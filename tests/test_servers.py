@@ -46,9 +46,7 @@ async def test_register_server_duplicate_name_returns_409(
     assert second.status_code == 409
 
 
-async def test_my_servers_returns_only_owned(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_my_servers_returns_only_owned(client: AsyncClient, auth_headers: dict[str, str]):
     # alice регистрирует два сервера.
     await client.post(
         "/servers/register",

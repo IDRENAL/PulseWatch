@@ -32,9 +32,9 @@ class AlertRule(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    metric_type: Mapped[str] = mapped_column(Enum(MetricType), nullable=False)
+    metric_type: Mapped[MetricType] = mapped_column(Enum(MetricType), nullable=False)
     metric_field: Mapped[str] = mapped_column(String(100), nullable=False)
-    operator: Mapped[str] = mapped_column(Enum(ThresholdOperator), nullable=False)
+    operator: Mapped[ThresholdOperator] = mapped_column(Enum(ThresholdOperator), nullable=False)
     threshold_value: Mapped[float] = mapped_column(Float, nullable=False)
     container_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True
@@ -44,9 +44,7 @@ class AlertRule(Base):
     last_triggered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -10,9 +10,7 @@ from agent.logs_streamer import LogsStreamer
 from agent.sender import MetricsSender
 
 
-async def _metrics_loop(
-    sender: MetricsSender, stop_event: asyncio.Event
-) -> None:
+async def _metrics_loop(sender: MetricsSender, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         system_payload = await asyncio.to_thread(collect_system_metrics)
         if await sender.send(system_payload):
@@ -26,10 +24,8 @@ async def _metrics_loop(
             )
 
         try:
-            await asyncio.wait_for(
-                stop_event.wait(), timeout=settings.send_interval_seconds
-            )
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(stop_event.wait(), timeout=settings.send_interval_seconds)
+        except TimeoutError:
             pass
 
 
@@ -61,20 +57,14 @@ async def run() -> None:
             api_key=settings.api_key,
             max_backoff_seconds=settings.logs_reconnect_max_seconds,
         )
-        tasks.append(
-            asyncio.create_task(streamer.run(stop_event), name="logs-streamer")
-        )
+        tasks.append(asyncio.create_task(streamer.run(stop_event), name="logs-streamer"))
 
     try:
         # Ждём либо graceful stop (через stop_event внутри задач), либо падения любой.
-        done, _pending = await asyncio.wait(
-            tasks, return_when=asyncio.FIRST_EXCEPTION
-        )
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         for task in done:
             if task.exception() is not None:
-                logger.error(
-                    "Задача {} упала: {}", task.get_name(), task.exception()
-                )
+                logger.error("Задача {} упала: {}", task.get_name(), task.exception())
     finally:
         stop_event.set()
         for task in tasks:

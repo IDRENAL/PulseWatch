@@ -1,17 +1,18 @@
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
-from jose import jwt, JWTError
+from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
+from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import settings
-from app.database import get_db
-from app.models.user import User
-from app.models.server import Server
-from app.core.security import verify_password
 
+from app.config import settings
+from app.core.security import verify_password
+from app.database import get_db
+from app.models.server import Server
+from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -25,16 +26,12 @@ async def get_current_user(
 
     try:
         # 1. Декодируем токен
-        payload = jwt.decode(
-            token, 
-            settings.secret_key,
-            algorithms=[settings.algorithm]
-        )
-        user_id: str = payload.get("sub")
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id: str | None = payload.get("sub")
         if user_id is None:
             raise creds_exc
     except JWTError:
-        raise creds_exc
+        raise creds_exc from None
 
     # 2. Ищем пользователя в базе
     result = await db.execute(select(User).where(User.id == int(user_id)))
@@ -65,7 +62,7 @@ async def verify_api_key(
         server_id_str, secret = api_key.split(".", 1)
         server_id = int(server_id_str)
     except (ValueError, AttributeError):
-        raise invalid_key_exc
+        raise invalid_key_exc from None
 
     result = await db.execute(select(Server).where(Server.id == server_id))
     server = result.scalar_one_or_none()
@@ -84,9 +81,7 @@ async def authenticate_ws_user(token: str | None, db: AsyncSession) -> User | No
     if not token:
         return None
     try:
-        payload = jwt.decode(
-            token, settings.secret_key, algorithms=[settings.algorithm]
-        )
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         user_id = payload.get("sub")
         if user_id is None:
             return None
@@ -97,9 +92,7 @@ async def authenticate_ws_user(token: str | None, db: AsyncSession) -> User | No
     return result.scalar_one_or_none()
 
 
-async def authenticate_ws_agent(
-    api_key: str | None, db: AsyncSession
-) -> Server | None:
+async def authenticate_ws_agent(api_key: str | None, db: AsyncSession) -> Server | None:
     """API-key аутентификация для WS. Возвращает None при любой ошибке."""
     if not api_key:
         return None

@@ -1,5 +1,6 @@
 """Тесты сервиса агрегации метрик."""
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
 from httpx import AsyncClient
@@ -7,16 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metric_aggregate import PeriodType
 from app.services.aggregation import (
-    aggregate_system_metrics,
-    aggregate_docker_metrics,
     aggregate_all_servers,
+    aggregate_docker_metrics,
+    aggregate_system_metrics,
 )
 
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     """Создаёт сервер и возвращает его данные с api_key."""
     response = await client.post(
         "/servers/register",
@@ -28,9 +27,7 @@ async def server_with_key(
 
 
 @pytest_asyncio.fixture
-async def second_server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def second_server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     """Создаёт второй сервер и возвращает его данные с api_key."""
     response = await client.post(
         "/servers/register",
@@ -77,7 +74,7 @@ async def test_aggregate_system_metrics_basic(
         assert r.status_code == 201
 
     # Задаём период агрегации — широкий диапазон, включающий все метрики
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -111,7 +108,7 @@ async def test_aggregate_system_metrics_no_data(
 ):
     """Агрегация для сервера без метрик возвращает None."""
     server_id = server_with_key["id"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=1)
     period_end = now + timedelta(hours=1)
 
@@ -140,7 +137,7 @@ async def test_aggregate_system_metrics_upsert(
             headers={"X-API-Key": api_key},
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -162,7 +159,8 @@ async def test_aggregate_system_metrics_upsert(
     assert abs(agg2.avg_cpu - 20.0) < 0.01
 
     # Проверяем, что в БД только одна запись агрегата
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models.metric_aggregate import MetricAggregate
 
     count_result = await db_session.execute(
@@ -188,12 +186,10 @@ async def test_aggregate_docker_metrics_basic(
     # Создаём 3 snapshot'а docker-метрик для одного контейнера
     for cpu in (10.0, 20.0, 30.0):
         payload = [_container_payload(name="pulsewatch_db", cpu_percent=cpu)]
-        r = await client.post(
-            "/docker-metrics", json=payload, headers={"X-API-Key": api_key}
-        )
+        r = await client.post("/docker-metrics", json=payload, headers={"X-API-Key": api_key})
         assert r.status_code == 201
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -225,12 +221,10 @@ async def test_aggregate_docker_metrics_multiple_containers(
         _container_payload(name="db", container_id="id-db", cpu_percent=10.0),
         _container_payload(name="redis", container_id="id-redis", cpu_percent=50.0),
     ]
-    r = await client.post(
-        "/docker-metrics", json=payload, headers={"X-API-Key": api_key}
-    )
+    r = await client.post("/docker-metrics", json=payload, headers={"X-API-Key": api_key})
     assert r.status_code == 201
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -258,7 +252,7 @@ async def test_aggregate_docker_metrics_no_data(
 ):
     """Агрегация docker-метрик: нет данных → пустой список."""
     server_id = server_with_key["id"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=1)
     period_end = now + timedelta(hours=1)
 
@@ -290,7 +284,7 @@ async def test_aggregate_all_servers(
         headers={"X-API-Key": second_server_with_key["api_key"]},
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     period_start = now - timedelta(hours=2)
     period_end = now + timedelta(hours=1)
 
@@ -298,6 +292,7 @@ async def test_aggregate_all_servers(
 
     # Проверяем, что агрегаты созданы для обоих серверов
     from sqlalchemy import select
+
     from app.models.metric_aggregate import MetricAggregate
 
     result = await db_session.execute(select(MetricAggregate))

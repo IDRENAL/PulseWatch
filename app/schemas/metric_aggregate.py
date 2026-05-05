@@ -7,6 +7,7 @@ from app.models.metric_aggregate import PeriodType
 
 class MetricAggregateRead(BaseModel):
     """Чтение агрегированных системных метрик."""
+
     id: int
     server_id: int
     period_type: PeriodType

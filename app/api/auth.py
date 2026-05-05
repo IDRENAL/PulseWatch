@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database import get_db
 from app.models.user import User
@@ -15,7 +16,8 @@ router = APIRouter()
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/minute")
+async def register_user(request: Request, data: UserCreate, db: AsyncSession = Depends(get_db)):
     # 1. Проверяем, существует ли пользователь
     query = select(User).where(User.email == data.email)
     result = await db.execute(query)
@@ -26,8 +28,6 @@ async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_409_CONFLICT,
             detail="Пользователь с таким email уже существует",
         )
-
-
 
     new_user = User(
         email=data.email,
@@ -43,16 +43,19 @@ async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Пользователь с таким email уже существует",
-        )
+        ) from None
     await db.refresh(new_user)
 
     # 4. Возвращаем созданного юзера
     return new_user
 
+
 @router.post("/login", response_model=Token, status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     # ШАГ 1: достать юзера
     query = select(User).where(User.email == form_data.username)
@@ -72,7 +75,7 @@ async def login(
     # ШАГ 4: вернуть токен
     return Token(access_token=token, token_type="bearer")
 
+
 @router.get("/me", response_model=UserRead)
-async def read_me(current_user: User =
-  Depends(get_current_user)):
-      return current_user
+async def read_me(current_user: User = Depends(get_current_user)):
+    return current_user

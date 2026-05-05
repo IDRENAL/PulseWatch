@@ -1,12 +1,11 @@
 """Тесты CRUD API правил алертов."""
+
 import pytest_asyncio
 from httpx import AsyncClient
 
 
 @pytest_asyncio.fixture
-async def server_with_key(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> dict:
+async def server_with_key(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
     response = await client.post(
         "/servers/register",
         json={"name": "web-prod-01"},
@@ -38,9 +37,7 @@ async def test_create_alert_rule_system(
     client: AsyncClient, auth_headers: dict[str, str], server_with_key: dict
 ):
     payload = _rule_payload(server_with_key["id"])
-    response = await client.post(
-        "/alerts/rules", json=payload, headers=auth_headers
-    )
+    response = await client.post("/alerts/rules", json=payload, headers=auth_headers)
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "High CPU"
@@ -67,9 +64,7 @@ async def test_create_alert_rule_docker(
         container_name="my_app",
         threshold_value=80.0,
     )
-    response = await client.post(
-        "/alerts/rules", json=payload, headers=auth_headers
-    )
+    response = await client.post("/alerts/rules", json=payload, headers=auth_headers)
     assert response.status_code == 201
     body = response.json()
     assert body["metric_type"] == "docker"
@@ -81,15 +76,11 @@ async def test_create_alert_rule_server_not_found(
     client: AsyncClient, auth_headers: dict[str, str]
 ):
     payload = _rule_payload(9999)
-    response = await client.post(
-        "/alerts/rules", json=payload, headers=auth_headers
-    )
+    response = await client.post("/alerts/rules", json=payload, headers=auth_headers)
     assert response.status_code == 404
 
 
-async def test_create_alert_rule_unauthenticated(
-    client: AsyncClient, server_with_key: dict
-):
+async def test_create_alert_rule_unauthenticated(client: AsyncClient, server_with_key: dict):
     payload = _rule_payload(server_with_key["id"])
     response = await client.post("/alerts/rules", json=payload)
     assert response.status_code == 401
@@ -146,9 +137,7 @@ async def test_list_alert_rules_filter_by_server(
         headers=auth_headers,
     )
 
-    response = await client.get(
-        f"/alerts/rules?server_id={server_id}", headers=auth_headers
-    )
+    response = await client.get(f"/alerts/rules?server_id={server_id}", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1
@@ -168,17 +157,13 @@ async def test_get_alert_rule(
     )
     rule_id = create_resp.json()["id"]
 
-    response = await client.get(
-        f"/alerts/rules/{rule_id}", headers=auth_headers
-    )
+    response = await client.get(f"/alerts/rules/{rule_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["id"] == rule_id
     assert response.json()["name"] == "High CPU"
 
 
-async def test_get_alert_rule_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_get_alert_rule_not_found(client: AsyncClient, auth_headers: dict[str, str]):
     response = await client.get("/alerts/rules/9999", headers=auth_headers)
     assert response.status_code == 404
 
@@ -243,20 +228,14 @@ async def test_delete_alert_rule(
     )
     rule_id = create_resp.json()["id"]
 
-    response = await client.delete(
-        f"/alerts/rules/{rule_id}", headers=auth_headers
-    )
+    response = await client.delete(f"/alerts/rules/{rule_id}", headers=auth_headers)
     assert response.status_code == 204
 
     # Проверяем, что правило удалено
-    get_resp = await client.get(
-        f"/alerts/rules/{rule_id}", headers=auth_headers
-    )
+    get_resp = await client.get(f"/alerts/rules/{rule_id}", headers=auth_headers)
     assert get_resp.status_code == 404
 
 
-async def test_delete_alert_rule_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-):
+async def test_delete_alert_rule_not_found(client: AsyncClient, auth_headers: dict[str, str]):
     response = await client.delete("/alerts/rules/9999", headers=auth_headers)
     assert response.status_code == 404

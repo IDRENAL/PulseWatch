@@ -34,7 +34,7 @@ async def stream_journal_logs() -> AsyncIterator[str]:
             proc.terminate()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("journalctl не остановился по SIGTERM, шлю SIGKILL")
                 proc.kill()
                 await proc.wait()

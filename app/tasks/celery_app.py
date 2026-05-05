@@ -1,4 +1,5 @@
 """Celery-приложение для фоновых задач PulseWatch."""
+
 from celery import Celery
 
 from app.config import settings

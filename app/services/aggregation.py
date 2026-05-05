@@ -1,15 +1,16 @@
 """Сервис агрегации метрик."""
-import logging
-from datetime import datetime, timezone
 
-from sqlalchemy import select, func, and_
+import logging
+from datetime import datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.docker_aggregate import DockerAggregate
+from app.models.docker_metric import DockerMetric
 from app.models.metric import Metric
 from app.models.metric_aggregate import MetricAggregate, PeriodType
-from app.models.docker_metric import DockerMetric
-from app.models.docker_aggregate import DockerAggregate
 from app.models.server import Server
 
 logger = logging.getLogger(__name__)
@@ -90,17 +91,21 @@ async def aggregate_system_metrics(
     await db.commit()
 
     # Получаем созданную/обновлённую запись
-    agg = (await db.execute(
-        select(MetricAggregate).where(
-            MetricAggregate.server_id == server_id,
-            MetricAggregate.period_type == period_type,
-            MetricAggregate.period_start == period_start,
+    agg = (
+        await db.execute(
+            select(MetricAggregate).where(
+                MetricAggregate.server_id == server_id,
+                MetricAggregate.period_type == period_type,
+                MetricAggregate.period_start == period_start,
+            )
         )
-    )).scalar_one()
+    ).scalar_one()
 
     logger.info(
         "Агрегация system server_id=%s %s: %d samples",
-        server_id, period_type, row.sample_count,
+        server_id,
+        period_type,
+        row.sample_count,
     )
     return agg
 
@@ -188,20 +193,24 @@ async def aggregate_docker_metrics(
         await db.execute(stmt)
 
         # Получаем созданную/обновлённую запись
-        agg = (await db.execute(
-            select(DockerAggregate).where(
-                DockerAggregate.server_id == server_id,
-                DockerAggregate.container_name == container_name,
-                DockerAggregate.period_type == period_type,
-                DockerAggregate.period_start == period_start,
+        agg = (
+            await db.execute(
+                select(DockerAggregate).where(
+                    DockerAggregate.server_id == server_id,
+                    DockerAggregate.container_name == container_name,
+                    DockerAggregate.period_type == period_type,
+                    DockerAggregate.period_start == period_start,
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
         aggregates.append(agg)
 
     await db.commit()
     logger.info(
         "Агрегация docker server_id=%s %s: %d containers",
-        server_id, period_type, len(aggregates),
+        server_id,
+        period_type,
+        len(aggregates),
     )
     return aggregates
 

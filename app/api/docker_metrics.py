@@ -19,9 +19,7 @@ async def submit_docker_metrics(
     server: Server = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = [
-        DockerMetric(server_id=server.id, **item.model_dump()) for item in data
-    ]
+    rows = [DockerMetric(server_id=server.id, **item.model_dump()) for item in data]
     db.add_all(rows)
 
     server.last_seen_at = func.now()

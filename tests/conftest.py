@@ -9,16 +9,22 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.core.rate_limit import limiter
 from app.database import Base, get_db
 from app.main import app
-from app.models.user import User  # noqa: F401  -- регистрирует таблицу в Base.metadata
-from app.models.server import Server  # noqa: F401
-from app.models.metric import Metric  # noqa: F401
-from app.models.docker_metric import DockerMetric  # noqa: F401
-from app.models.metric_aggregate import MetricAggregate  # noqa: F401
-from app.models.docker_aggregate import DockerAggregate  # noqa: F401
-from app.models.alert_rule import AlertRule  # noqa: F401
 from app.models.alert_event import AlertEvent  # noqa: F401
+from app.models.alert_rule import AlertRule  # noqa: F401
+from app.models.docker_aggregate import DockerAggregate  # noqa: F401
+from app.models.docker_metric import DockerMetric  # noqa: F401
+from app.models.metric import Metric  # noqa: F401
+from app.models.metric_aggregate import MetricAggregate  # noqa: F401
+from app.models.server import Server  # noqa: F401
+from app.models.user import User  # noqa: F401  -- регистрирует таблицу в Base.metadata
+
+# Rate limiter отключён глобально для тестов, иначе 4-я регистрация в одном
+# тесте или 6-й логин ловят 429 и валят сценарий. Тесты на сам лимитер
+# включают его обратно через свою фикстуру.
+limiter.enabled = False
 
 TEST_DB_NAME = "pulsewatch_test"
 TEST_DB_URL = (
@@ -34,9 +40,7 @@ ADMIN_DB_URL = (
 async def _ensure_test_db_exists() -> None:
     conn = await asyncpg.connect(ADMIN_DB_URL)
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME)
         if not exists:
             await conn.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
     finally:
@@ -79,6 +83,7 @@ async def client(test_engine):
 @pytest.fixture
 def sync_client(test_engine):
     """Sync TestClient для WS-тестов (наш AsyncClient WS не поддерживает)."""
+
     async def _reset_db():
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)

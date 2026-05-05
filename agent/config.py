@@ -14,9 +14,9 @@ class AgentSettings(BaseSettings):
     def ws_base_url(self) -> str:
         # http://… → ws://…, https://… → wss://…
         if self.api_url.startswith("https://"):
-            return "wss://" + self.api_url[len("https://"):]
+            return "wss://" + self.api_url[len("https://") :]
         if self.api_url.startswith("http://"):
-            return "ws://" + self.api_url[len("http://"):]
+            return "ws://" + self.api_url[len("http://") :]
         return self.api_url
 
     model_config = SettingsConfigDict(
