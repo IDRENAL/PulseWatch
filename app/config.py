@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     telegram_bot_username: str | None = (
         None  # без @, нужен для deep-link https://t.me/<u>?start=<code>
     )
+    # SMTP — все поля опциональные; если smtp_host пуст, email-уведомления выключены
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_address: str | None = None
+    smtp_use_tls: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

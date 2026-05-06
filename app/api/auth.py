@@ -14,7 +14,13 @@ from app.database import get_db
 from app.models.user import User
 from app.redis_client import store_tg_link_code
 from app.schemas.token import Token
-from app.schemas.user import TelegramLink, TelegramLinkCode, UserCreate, UserRead
+from app.schemas.user import (
+    EmailAlertsToggle,
+    TelegramLink,
+    TelegramLinkCode,
+    UserCreate,
+    UserRead,
+)
 
 router = APIRouter()
 
@@ -93,6 +99,19 @@ async def link_telegram(
 ):
 
     current_user.telegram_chat_id = data.chat_id
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.patch("/me/email-alerts", response_model=UserRead)
+async def toggle_email_alerts(
+    data: EmailAlertsToggle,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Включает/выключает email-уведомления об алертах для текущего юзера."""
+    current_user.email_alerts_enabled = data.enabled
     await db.commit()
     await db.refresh(current_user)
     return current_user

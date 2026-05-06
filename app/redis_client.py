@@ -89,27 +89,29 @@ async def consume_tg_link_code(code: str) -> int | None:
     return int(raw_user_id)
 
 
-# ─── Telegram mute (заглушка уведомлений на сервер) ─────────────────────────
+# ─── Mute (общая заглушка уведомлений на сервер для всех каналов) ───────────
 
 
-def _tg_mute_key(server_id: int) -> str:
-    return f"tg:mute:{server_id}"
+def _mute_key(server_id: int) -> str:
+    return f"mute:{server_id}"
 
 
 async def set_server_mute(server_id: int, minutes: int) -> None:
-    """Глушит Telegram-уведомления для сервера на N минут (Redis SETEX)."""
+    """Глушит уведомления для сервера на N минут (Redis SETEX). Применяется
+    ко всем каналам — Telegram, email и т.д.
+    """
     r = _get_app_redis()
-    await r.set(_tg_mute_key(server_id), "1", ex=minutes * 60)
+    await r.set(_mute_key(server_id), "1", ex=minutes * 60)
 
 
 async def is_server_muted(server_id: int) -> bool:
     """True, если активна заглушка для сервера."""
     r = _get_app_redis()
-    return await r.exists(_tg_mute_key(server_id)) == 1
+    return await r.exists(_mute_key(server_id)) == 1
 
 
 async def get_mute_ttl(server_id: int) -> int | None:
     """TTL заглушки в секундах или None если её нет."""
     r = _get_app_redis()
-    ttl = await r.ttl(_tg_mute_key(server_id))
+    ttl = await r.ttl(_mute_key(server_id))
     return ttl if ttl > 0 else None
