@@ -1,11 +1,27 @@
 from datetime import UTC, datetime
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
 from app.redis_client import publish_alert
+
+
+def _enqueue_telegram_alert(event_id: int) -> None:
+    """Ставит задачу отправки Telegram-уведомления в Celery-очередь.
+
+    Импорт лежит внутри функции, чтобы не тянуть Celery (и Redis-клиент брокера)
+    в код, который тестируется без воркера. Best-effort — если очередь недоступна,
+    лог и идём дальше: создание события важнее доставки уведомления.
+    """
+    try:
+        from app.tasks.notification_tasks import send_telegram_alert
+
+        send_telegram_alert.delay(event_id)
+    except Exception as exc:
+        logger.warning("Failed to enqueue telegram alert for event_id={}: {}", event_id, exc)
 
 
 def _compare(actual: float, operator: ThresholdOperator, threshold: float) -> bool:
@@ -74,6 +90,7 @@ async def evaluate_system_metrics(
         await db.commit()
         for event, rule in pending:
             await db.refresh(event)
+            _enqueue_telegram_alert(event.id)
             # Публикация в Redis (best-effort)
             try:
                 await publish_alert(
@@ -151,6 +168,7 @@ async def evaluate_docker_metrics(
         await db.commit()
         for event, rule in pending:
             await db.refresh(event)
+            _enqueue_telegram_alert(event.id)
             try:
                 await publish_alert(
                     server_id=server_id,
