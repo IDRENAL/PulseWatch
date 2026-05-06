@@ -34,3 +34,13 @@ class TelegramLink(BaseModel):
         if not (v.lstrip("-").isdigit() and v != "-"):
             raise ValueError("chat_id должен быть целым числом")
         return v
+
+
+class TelegramLinkCode(BaseModel):
+    """Ответ на POST /auth/me/telegram/code: одноразовый код привязки + deep-link."""
+
+    code: str
+    deep_link: str | None = (
+        None  # https://t.me/<bot>?start=<code>, если bot_username сконфигурирован
+    )
+    expires_in_seconds: int

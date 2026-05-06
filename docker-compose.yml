@@ -11,6 +11,7 @@ x-app-env: &app-env
   ALGORITHM: ${ALGORITHM}
   ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
 
 services:
   db:
@@ -81,6 +82,18 @@ services:
         condition: service_healthy
     environment: *app-env
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "-l", "info"]
+
+  bot:
+    build: .
+    container_name: pulsewatch_bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *app-env
+    command: ["python", "-m", "app.telegram_bot"]
 
 volumes:
   postgres_data:

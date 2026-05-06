@@ -56,3 +56,34 @@ async def get_cached_dashboard(user_id: int) -> str | None:
 def get_redis() -> Redis:
     """Публичный доступ к Redis-клиенту (для WS и health)."""
     return _get_app_redis()
+
+
+# ─── Telegram /start link codes ─────────────────────────────────────────────
+
+_TG_LINK_CODE_TTL_SECONDS = 600  # 10 минут
+
+
+def _tg_link_key(code: str) -> str:
+    return f"tg:linkcode:{code}"
+
+
+async def store_tg_link_code(code: str, user_id: int) -> None:
+    """Сохраняет одноразовый код привязки Telegram с TTL 10 мин."""
+    r = _get_app_redis()
+    await r.set(_tg_link_key(code), str(user_id), ex=_TG_LINK_CODE_TTL_SECONDS)
+
+
+async def consume_tg_link_code(code: str) -> int | None:
+    """Извлекает user_id по коду и сразу удаляет код (одноразовый).
+
+    Returns user_id или None если код не найден / истёк.
+    """
+    r = _get_app_redis()
+    key = _tg_link_key(code)
+    pipe = r.pipeline()
+    pipe.get(key)
+    pipe.delete(key)
+    raw_user_id, _ = await pipe.execute()
+    if raw_user_id is None:
+        return None
+    return int(raw_user_id)

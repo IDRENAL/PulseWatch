@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
@@ -5,12 +7,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database import get_db
 from app.models.user import User
+from app.redis_client import store_tg_link_code
 from app.schemas.token import Token
-from app.schemas.user import TelegramLink, UserCreate, UserRead
+from app.schemas.user import TelegramLink, TelegramLinkCode, UserCreate, UserRead
 
 router = APIRouter()
 
@@ -92,3 +96,22 @@ async def link_telegram(
     await db.commit()
     await db.refresh(current_user)
     return current_user
+
+
+@router.post("/me/telegram/code", response_model=TelegramLinkCode)
+async def create_telegram_link_code(
+    current_user: User = Depends(get_current_user),
+):
+    """Генерирует одноразовый код для привязки Telegram через бота.
+
+    Юзер отправляет боту `/start <code>`, бот ставит `chat_id` в users.
+    Код действителен 10 минут, одноразовый.
+    """
+    code = secrets.token_hex(4)  # 8 hex-символов, ~4*10^9 вариантов
+    await store_tg_link_code(code, current_user.id)
+
+    deep_link = None
+    if settings.telegram_bot_username:
+        deep_link = f"https://t.me/{settings.telegram_bot_username}?start={code}"
+
+    return TelegramLinkCode(code=code, deep_link=deep_link, expires_in_seconds=600)
