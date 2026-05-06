@@ -13,5 +13,6 @@ class AlertEventRead(BaseModel):
     threshold_value: float
     message: str
     created_at: datetime
+    resolved_at: datetime | None = None
 
     model_config = {"from_attributes": True}

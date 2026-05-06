@@ -29,6 +29,10 @@ celery_app.conf.update(
             "task": "app.tasks.heartbeat_tasks.task_check_heartbeat",
             "schedule": 60.0,  # каждую минуту
         },
+        "resolve-alerts": {
+            "task": "app.tasks.resolve_tasks.task_resolve_alerts",
+            "schedule": 60.0,  # каждую минуту
+        },
     },
 )
 
