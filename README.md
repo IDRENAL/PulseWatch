@@ -28,9 +28,9 @@ Self-hosted система мониторинга серверов: агенты
 
 - **Агент** — Python-процесс на наблюдаемом сервере. `psutil` для системных метрик, Docker SDK для контейнеров, journalctl для логов. Шлёт раз в 10 секунд через `httpx`.
 - **Backend (FastAPI)** — приём метрик, JWT-аутентификация юзеров, API-ключи для агентов, REST + WebSocket эндпоинты.
-- **Postgres** — хранит юзеров (с привязкой к Telegram-чату), серверы, raw-метрики (24ч), агрегаты (`metric_aggregates`, `docker_aggregates`), алерт-правила и события.
+- **Postgres** — хранит юзеров (с настройками уведомлений: Telegram chat_id + флаг email_alerts_enabled), серверы, raw-метрики (24ч), агрегаты (`metric_aggregates`, `docker_aggregates`), алерт-правила и события.
 - **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), Celery broker (db=1) и backend (db=2).
-- **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов, отправка уведомлений в Telegram.
+- **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов, отправка уведомлений в Telegram и email.
 - **Telegram bot** — отдельный long-polling процесс, обрабатывает `/start <код>` для привязки чата к юзеру. Одноразовые коды живут в Redis с TTL 10 мин.
 
 ## Стек
@@ -97,6 +97,7 @@ curl -X POST http://localhost:8000/servers/register \
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | TTL access-токена |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от `@BotFather`. Опционально — если пусто, уведомления отключены |
 | `TELEGRAM_BOT_USERNAME` | Username бота (без `@`). Нужен только для deep-link в `/auth/me/telegram/code` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_USE_TLS` | SMTP для email-уведомлений. Пусто → канал выключен |
 | `AGENT_API_URL` | URL бэкенда для агента |
 | `AGENT_API_KEY` | API-ключ от `/servers/register`, формат `<server_id>.<secret>` |
 | `AGENT_SEND_INTERVAL_SECONDS` | Период отправки метрик (по умолчанию 10с) |
@@ -111,6 +112,7 @@ curl -X POST http://localhost:8000/servers/register \
 - `GET /auth/me` — текущий юзер.
 - `POST /auth/me/telegram/code` — генерит одноразовый код привязки + deep-link `https://t.me/<bot>?start=<code>` (TTL 10 мин). Юзер шлёт `/start <code>` боту → бот ставит chat_id.
 - `PATCH /auth/me/telegram` — ручная привязка/отвязка chat_id (для скриптов). Тело: `{"chat_id": "12345"}` или `{"chat_id": null}`.
+- `PATCH /auth/me/email-alerts` — включить/выключить email-уведомления. Тело: `{"enabled": true \| false}`.
 
 ### Серверы
 - `POST /servers/register` — создать сервер, получить API-ключ.
@@ -151,7 +153,11 @@ curl -X POST http://localhost:8000/servers/register \
 
 При превышении — `400 Bad Request`.
 
-## Telegram-уведомления
+## Уведомления
+
+При срабатывании алерт-правила событие шлётся в **два канала параллельно**: Telegram (если у юзера привязан `telegram_chat_id` и токен бота настроен) и email (если SMTP сконфигурирован и у юзера `email_alerts_enabled=true`). Оба канала уважают **один общий mute** (Redis-ключ `mute:<server_id>`, ставится через бот-команду `/mute`).
+
+### Telegram
 
 1. Создай бота через [`@BotFather`](https://t.me/BotFather) (`/newbot` → имя → username с суффиксом `bot`). Получишь токен формата `7234567890:AAH...`.
 2. Добавь в `.env`:
@@ -200,7 +206,32 @@ curl -X PATCH http://localhost:8000/auth/me/telegram \
 | `/servers` | Подробный список серверов: имя, `last_seen_at`, активность |
 | `/mute <server_id> <minutes>` | Глушит уведомления для сервера на N минут (1–1440). Хранится в Redis с TTL |
 
-Mute проверяется в `send_telegram_alert` перед отправкой — пока работает заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `/auth/me/telegram` → `GET /alerts/events`.
+Mute проверяется в `send_telegram_alert` и `send_email_alert` перед отправкой — пока активна заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `GET /alerts/events`.
+
+### Email
+
+1. Заведи SMTP-аккаунт (например, в почтовом провайдере включи app password).
+2. Заполни в `.env`:
+   ```
+   SMTP_HOST=smtp.example.com
+   SMTP_PORT=587
+   SMTP_USER=alerts@example.com
+   SMTP_PASSWORD=...
+   SMTP_FROM_ADDRESS=alerts@example.com
+   SMTP_USE_TLS=true
+   ```
+3. Перезапусти Celery `worker` (`docker compose restart worker`).
+
+Уведомления шлются на `users.email` (тот же, по которому юзер логинится). Опт-аут:
+
+```bash
+curl -X PATCH http://localhost:8000/auth/me/email-alerts \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+
+Если `SMTP_HOST` не задан — канал молча выключен, никаких ошибок.
 
 ## Установка агента на наблюдаемый сервер
 
@@ -271,7 +302,7 @@ app/
   core/       # security, rate_limit, connection manager
   models/     # SQLAlchemy модели
   schemas/    # Pydantic-схемы (вход/выход)
-  services/   # бизнес-логика (threshold, aggregation, alert_resolver, telegram)
+  services/   # бизнес-логика (threshold, aggregation, alert_resolver, telegram, email_alert)
   tasks/      # Celery задачи (агрегация, heartbeat, notification, resolve)
   utils/      # стриминг CSV
   telegram_bot.py  # long-polling процесс для /start <код>
@@ -287,8 +318,8 @@ docs/         # планы этапов
 
 - Auto-resolve работает только для системных алертов. Docker-резолв не реализован — у `AlertEvent` нет колонки `container_name`, чтобы понять метрики какого контейнера перепроверять.
 - Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
-- Email-уведомления не реализованы (только Telegram).
 - Telegram-бот команд для админки сервера пока нет (например, удаления сервера, переключения активности правила). Текущий набор: `/start`, `/status`, `/servers`, `/mute`.
+- Per-канальный mute не поддерживается — `/mute` глушит и Telegram, и email одновременно.
 
 ## Лицензия
 
