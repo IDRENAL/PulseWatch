@@ -9,6 +9,20 @@ from app.models.metric_aggregate import PeriodType
 from app.tasks.celery_app import celery_app
 
 
+@celery_app.task(name="app.tasks.aggregation_tasks.task_aggregate_fivemin")
+def task_aggregate_fivemin() -> None:
+    """Агрегация метрик за предыдущие 5 минут."""
+    now = datetime.now(UTC)
+    # Округляем до начала текущего 5-минутного окна, потом откатываемся на одно окно назад.
+    minute_floor = (now.minute // 5) * 5
+    period_start = now.replace(minute=minute_floor, second=0, microsecond=0) - timedelta(minutes=5)
+    period_end = period_start + timedelta(minutes=5)
+
+    logger.info("Запуск 5min агрегации: {} — {}", period_start, period_end)
+
+    asyncio.run(_run_aggregation(PeriodType.fivemin, period_start, period_end))
+
+
 @celery_app.task(name="app.tasks.aggregation_tasks.task_aggregate_hourly")
 def task_aggregate_hourly() -> None:
     """Агрегация метрик за предыдущий час."""

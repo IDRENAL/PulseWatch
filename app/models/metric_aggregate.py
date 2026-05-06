@@ -8,6 +8,7 @@ from app.database import Base
 
 
 class PeriodType(str, PyEnum):
+    fivemin = "fivemin"
     hourly = "hourly"
     daily = "daily"
 
