@@ -17,6 +17,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     beat_schedule={
+        "aggregate-fivemin": {
+            "task": "app.tasks.aggregation_tasks.task_aggregate_fivemin",
+            "schedule": 300.0,  # каждые 5 минут
+        },
         "aggregate-hourly": {
             "task": "app.tasks.aggregation_tasks.task_aggregate_hourly",
             "schedule": 3600.0,  # каждый час

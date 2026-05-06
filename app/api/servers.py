@@ -302,6 +302,7 @@ _SYSTEM_AGG_HEADER = [
 ]
 _EXPORT_LIMITS = {
     "raw": timedelta(hours=24),
+    "fivemin": timedelta(days=7),
     "hourly": timedelta(days=30),
     "daily": timedelta(days=365),
 }
@@ -310,6 +311,18 @@ _EXPORT_LIMITS = {
 def _normalize_utc(dt: datetime) -> datetime:
     """Если datetime naive — считаем, что это UTC."""
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+
+
+_GRANULARITY_TO_PERIOD = {
+    "fivemin": AggregatePeriodType.fivemin,
+    "hourly": AggregatePeriodType.hourly,
+    "daily": AggregatePeriodType.daily,
+}
+
+
+def _granularity_to_period(granularity: str) -> AggregatePeriodType:
+    """Маппит строку granularity из Query на enum PeriodType."""
+    return _GRANULARITY_TO_PERIOD[granularity]
 
 
 async def _verify_server_ownership(db: AsyncSession, server_id: int, user_id: int) -> Server:
@@ -405,7 +418,7 @@ async def export_system_metrics(
     server_id: int,
     start: datetime = Query(..., description="Начало периода (ISO datetime)"),
     end: datetime = Query(..., description="Конец периода (ISO datetime)"),
-    granularity: Literal["raw", "hourly", "daily"] = Query(default="raw"),
+    granularity: Literal["raw", "fivemin", "hourly", "daily"] = Query(default="raw"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -417,9 +430,7 @@ async def export_system_metrics(
         header = _SYSTEM_RAW_HEADER
         rows = _stream_system_raw(db, server_id, start, end)
     else:
-        period = (
-            AggregatePeriodType.hourly if granularity == "hourly" else AggregatePeriodType.daily
-        )
+        period = _granularity_to_period(granularity)
         header = _SYSTEM_AGG_HEADER
         rows = _stream_system_agg(db, server_id, start, end, period)
 
@@ -518,7 +529,7 @@ async def export_docker_metrics(
     server_id: int,
     start: datetime = Query(..., description="Начало периода (ISO datetime)"),
     end: datetime = Query(..., description="Конец периода (ISO datetime)"),
-    granularity: Literal["raw", "hourly", "daily"] = Query(default="raw"),
+    granularity: Literal["raw", "fivemin", "hourly", "daily"] = Query(default="raw"),
     container_name: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -531,9 +542,7 @@ async def export_docker_metrics(
         header = _DOCKER_RAW_HEADER
         rows = _stream_docker_raw(db, server_id, start, end, container_name)
     else:
-        period = (
-            AggregatePeriodType.hourly if granularity == "hourly" else AggregatePeriodType.daily
-        )
+        period = _granularity_to_period(granularity)
         header = _DOCKER_AGG_HEADER
         rows = _stream_docker_agg(db, server_id, start, end, period, container_name)
 
