@@ -9,6 +9,7 @@ Create Date: 2026-05-04 16:15:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -21,16 +22,30 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Создание таблиц metric_aggregates и docker_aggregates."""
-    # Создаём ENUM-тип для period_type
-    periodtype = sa.Enum("hourly", "daily", name="periodtype")
-    periodtype.create(op.get_bind(), checkfirst=True)
+    # Создаём ENUM-тип идемпотентно через DO-блок — Postgres не имеет
+    # CREATE TYPE IF NOT EXISTS, а sa.Enum.create(checkfirst=True) в async-режиме
+    # некорректно проверяет существование типа.
+    op.execute(
+        """
+        DO $$ BEGIN
+            CREATE TYPE periodtype AS ENUM ('hourly', 'daily');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+        """
+    )
+
+    # Для колонок create_type=False — тип уже создан выше.
+    # Используем postgresql.ENUM (диалектный класс) — sa.Enum в async-режиме
+    # игнорирует create_type=False и пытается создать тип повторно.
+    periodtype_col = postgresql.ENUM("hourly", "daily", name="periodtype", create_type=False)
 
     # Таблица агрегированных системных метрик
     op.create_table(
         "metric_aggregates",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("server_id", sa.Integer(), nullable=False),
-        sa.Column("period_type", periodtype, nullable=False),
+        sa.Column("period_type", periodtype_col, nullable=False),
         sa.Column("period_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("period_end", sa.DateTime(timezone=True), nullable=False),
         sa.Column("avg_cpu", sa.Float(), nullable=False),
@@ -58,7 +73,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("server_id", sa.Integer(), nullable=False),
         sa.Column("container_name", sa.String(255), nullable=False),
-        sa.Column("period_type", periodtype, nullable=False),
+        sa.Column("period_type", periodtype_col, nullable=False),
         sa.Column("period_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("period_end", sa.DateTime(timezone=True), nullable=False),
         sa.Column("avg_cpu", sa.Float(), nullable=False),
