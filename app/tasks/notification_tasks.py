@@ -4,12 +4,15 @@ import asyncio
 import html
 
 from loguru import logger
+from redis.asyncio import Redis
 from sqlalchemy import select
 
+from app.config import settings
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule
 from app.models.server import Server
 from app.models.user import User
+from app.redis_client import is_server_muted, set_redis_client
 from app.services.telegram import (
     TelegramNotConfiguredError,
     TelegramSendError,
@@ -38,42 +41,57 @@ def send_telegram_alert(event_id: int) -> None:
 async def _send(event_id: int) -> None:
     from app.database import async_session_factory
 
-    async with async_session_factory() as db:
-        # Подтягиваем event + rule + server + user одним запросом
-        stmt = (
-            select(AlertEvent, AlertRule, Server, User)
-            .join(AlertRule, AlertEvent.rule_id == AlertRule.id)
-            .join(Server, AlertEvent.server_id == Server.id)
-            .join(User, Server.owner_id == User.id)
-            .where(AlertEvent.id == event_id)
-        )
-        row = (await db.execute(stmt)).first()
-
-    if row is None:
-        logger.warning("send_telegram_alert: AlertEvent id={} not found", event_id)
-        return
-
-    event, rule, server, user = row
-
-    if not user.telegram_chat_id:
-        logger.info(
-            "send_telegram_alert: user id={} has no telegram_chat_id, skipping event id={}",
-            user.id,
-            event_id,
-        )
-        return
-
-    text = _format_message(event, rule, server)
-
+    # Celery-воркер не запускает FastAPI lifespan, поэтому Redis-клиент
+    # надо инициализировать локально для проверки mute.
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    set_redis_client(redis)
     try:
-        await send_message(user.telegram_chat_id, text)
-    except TelegramNotConfiguredError:
-        logger.warning(
-            "send_telegram_alert: TELEGRAM_BOT_TOKEN не задан, пропускаем event id={}",
-            event_id,
-        )
-        return
-    # TelegramSendError пробрасывается выше — Celery сделает ретрай
+        async with async_session_factory() as db:
+            stmt = (
+                select(AlertEvent, AlertRule, Server, User)
+                .join(AlertRule, AlertEvent.rule_id == AlertRule.id)
+                .join(Server, AlertEvent.server_id == Server.id)
+                .join(User, Server.owner_id == User.id)
+                .where(AlertEvent.id == event_id)
+            )
+            row = (await db.execute(stmt)).first()
+
+        if row is None:
+            logger.warning("send_telegram_alert: AlertEvent id={} not found", event_id)
+            return
+
+        event, rule, server, user = row
+
+        if not user.telegram_chat_id:
+            logger.info(
+                "send_telegram_alert: user id={} has no telegram_chat_id, skipping event id={}",
+                user.id,
+                event_id,
+            )
+            return
+
+        if await is_server_muted(server.id):
+            logger.info(
+                "send_telegram_alert: server id={} muted, skipping event id={}",
+                server.id,
+                event_id,
+            )
+            return
+
+        text = _format_message(event, rule, server)
+
+        try:
+            await send_message(user.telegram_chat_id, text)
+        except TelegramNotConfiguredError:
+            logger.warning(
+                "send_telegram_alert: TELEGRAM_BOT_TOKEN не задан, пропускаем event id={}",
+                event_id,
+            )
+            return
+        # TelegramSendError пробрасывается выше — Celery сделает ретрай
+    finally:
+        await redis.aclose()
+        set_redis_client(None)
 
 
 def _format_message(event: AlertEvent, rule: AlertRule, server: Server) -> str:

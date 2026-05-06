@@ -356,6 +356,166 @@ async def test_bot_handle_unrelated_text_ignored():
     send_mock.assert_not_awaited()
 
 
+# ─── Bot commands: /status, /servers, /mute ─────────────────────────────────
+
+
+async def test_bot_unknown_command_unauthenticated_chat():
+    """Неизвестная команда от непривязанного чата → подсказка о привязке."""
+    from app.telegram_bot import _handle_message
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_message(AsyncMock(), {"chat": {"id": 999}, "text": "/status"})
+
+    text = send_mock.call_args[0][2]
+    assert "не привязан" in text
+
+
+async def test_bot_status_authenticated_user(monkeypatch):
+    """`/status` для привязанного юзера → шлём сводку."""
+    from app.telegram_bot import _handle_status
+
+    user = MagicMock(id=1)
+
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    metric = MagicMock(cpu_percent=15.5, memory_percent=40.2, disk_percent=30.0)
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+
+    # Мокаем три разных execute-вызова: серверы, latest metric, open events
+    servers_result = MagicMock()
+    servers_result.scalars.return_value.all.return_value = [server]
+    metric_result = MagicMock()
+    metric_result.scalar_one_or_none.return_value = metric
+    events_result = MagicMock()
+    events_result.all.return_value = []
+
+    fake_session.execute.side_effect = [servers_result, metric_result, events_result]
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.get_mute_ttl", new=AsyncMock(return_value=None)),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_status(AsyncMock(), 555, user)
+
+    text = send_mock.call_args[0][2]
+    assert "prod-1" in text
+    assert "cpu=15.5" in text
+
+
+async def test_bot_mute_validates_server_owner():
+    """`/mute` чужого сервера → 'не найден или не твой'."""
+    from app.telegram_bot import _handle_mute
+
+    user = MagicMock(id=1)
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.set_server_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_mute(AsyncMock(), 555, user, "/mute 42 30")
+
+    mute_mock.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "не найден" in text
+
+
+async def test_bot_mute_happy_path():
+    """`/mute <my_server> 30` → set_server_mute(server, 30) + ack."""
+    from app.telegram_bot import _handle_mute
+
+    user = MagicMock(id=1)
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=server)
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.set_server_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_mute(AsyncMock(), 555, user, "/mute 42 30")
+
+    mute_mock.assert_awaited_once_with(42, 30)
+    text = send_mock.call_args[0][2]
+    assert "заглушен" in text
+
+
+async def test_bot_mute_invalid_minutes():
+    """`/mute 42 0` → отказ по диапазону 1..1440."""
+    from app.telegram_bot import _handle_mute
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_mute(AsyncMock(), 555, MagicMock(id=1), "/mute 42 0")
+    text = send_mock.call_args[0][2]
+    assert "1..1440" in text
+
+
+async def test_bot_mute_bad_format():
+    """`/mute foo` → подсказка по использованию."""
+    from app.telegram_bot import _handle_mute
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_mute(AsyncMock(), 555, MagicMock(id=1), "/mute foo")
+    text = send_mock.call_args[0][2]
+    assert "Использование" in text
+
+
+# ─── send_telegram_alert respects mute ──────────────────────────────────────
+
+
+def test_send_telegram_alert_skips_muted_server():
+    """is_server_muted=True → send_message не вызывается."""
+    from app.tasks.notification_tasks import send_telegram_alert
+
+    event = MagicMock(metric_value=95.0, threshold_value=90.0, created_at=datetime.now(UTC))
+    rule = MagicMock(metric_field="cpu_percent")
+    rule.name = "high cpu"
+    rule.operator.value = "gt"
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    user = MagicMock(id=1, telegram_chat_id="555")
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.first = MagicMock(return_value=(event, rule, server, user))
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    fake_redis = AsyncMock()
+    fake_redis.aclose = AsyncMock()
+
+    with (
+        patch("app.database.async_session_factory", return_value=fake_session_cm),
+        patch("app.tasks.notification_tasks.Redis.from_url", return_value=fake_redis),
+        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=True)),
+        patch("app.tasks.notification_tasks.send_message", new=AsyncMock()) as send_mock,
+    ):
+        send_telegram_alert(event_id=1)
+
+    send_mock.assert_not_called()
+
+
 async def test_threshold_enqueues_telegram_alert_on_trigger():
     """evaluate_system_metrics должен вызвать send_telegram_alert.delay после commit."""
     from app.models.alert_rule import ThresholdOperator
