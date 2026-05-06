@@ -14,8 +14,15 @@ class UserRead(BaseModel):
     is_active: bool
     created_at: datetime
     telegram_chat_id: str | None = None
+    email_alerts_enabled: bool = True
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EmailAlertsToggle(BaseModel):
+    """Переключатель email-уведомлений для текущего юзера."""
+
+    enabled: bool
 
 
 class TelegramLink(BaseModel):

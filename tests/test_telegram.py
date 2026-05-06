@@ -516,8 +516,8 @@ def test_send_telegram_alert_skips_muted_server():
     send_mock.assert_not_called()
 
 
-async def test_threshold_enqueues_telegram_alert_on_trigger():
-    """evaluate_system_metrics должен вызвать send_telegram_alert.delay после commit."""
+async def test_threshold_enqueues_notifications_on_trigger():
+    """evaluate_system_metrics должен поставить и telegram, и email задачи после commit."""
     from app.models.alert_rule import ThresholdOperator
     from app.services.threshold import evaluate_system_metrics
 
@@ -538,10 +538,12 @@ async def test_threshold_enqueues_telegram_alert_on_trigger():
     db.execute.return_value = scalars
 
     with (
-        patch("app.tasks.notification_tasks.send_telegram_alert.delay") as delay_mock,
+        patch("app.tasks.notification_tasks.send_telegram_alert.delay") as tg_mock,
+        patch("app.tasks.notification_tasks.send_email_alert.delay") as email_mock,
         patch("app.services.threshold.publish_alert", new=AsyncMock()),
     ):
         events = await evaluate_system_metrics(db, server_id=1, metric_data={"cpu_percent": 95.0})
 
     assert len(events) == 1
-    delay_mock.assert_called_once()
+    tg_mock.assert_called_once()
+    email_mock.assert_called_once()
