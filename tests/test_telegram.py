@@ -240,6 +240,122 @@ def test_send_telegram_alert_calls_send_message_with_html():
 # ─── threshold.py wiring ─────────────────────────────────────────────────────
 
 
+# ─── POST /auth/me/telegram/code (link code generation) ─────────────────────
+
+
+async def test_create_telegram_link_code_returns_code(
+    client: AsyncClient, auth_headers: dict[str, str]
+):
+    """Авторизованный юзер получает 8-символьный hex-код с TTL 600s."""
+    with (
+        patch("app.api.auth.settings.telegram_bot_username", "pulsewatch_test_bot"),
+        patch("app.api.auth.store_tg_link_code", new=AsyncMock()) as store_mock,
+    ):
+        response = await client.post("/auth/me/telegram/code", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["code"]) == 8
+    assert all(c in "0123456789abcdef" for c in body["code"])
+    assert body["expires_in_seconds"] == 600
+    assert body["deep_link"] == f"https://t.me/pulsewatch_test_bot?start={body['code']}"
+    store_mock.assert_awaited_once()
+    args, _ = store_mock.call_args
+    assert args[0] == body["code"]  # код, который вернули = код, который сохранили
+
+
+async def test_create_telegram_link_code_without_bot_username(
+    client: AsyncClient, auth_headers: dict[str, str]
+):
+    """Если TELEGRAM_BOT_USERNAME не задан — deep_link = None, код всё равно отдаётся."""
+    with (
+        patch("app.api.auth.settings.telegram_bot_username", None),
+        patch("app.api.auth.store_tg_link_code", new=AsyncMock()),
+    ):
+        response = await client.post("/auth/me/telegram/code", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"]
+    assert body["deep_link"] is None
+
+
+async def test_create_telegram_link_code_without_auth_returns_401(client: AsyncClient):
+    response = await client.post("/auth/me/telegram/code")
+    assert response.status_code == 401
+
+
+# ─── telegram_bot._handle_message ───────────────────────────────────────────
+
+
+async def test_bot_handle_start_with_valid_code_links_user():
+    """`/start <valid>` находит юзера, вызывает _link_user и шлёт success."""
+    from app.telegram_bot import _handle_message
+
+    client_mock = AsyncMock()
+    message = {"chat": {"id": 555}, "text": "/start abc123"}
+
+    with (
+        patch("app.telegram_bot.consume_tg_link_code", new=AsyncMock(return_value=42)),
+        patch("app.telegram_bot._link_user", new=AsyncMock(return_value=True)) as link_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_message(client_mock, message)
+
+    link_mock.assert_awaited_once_with(42, 555)
+    send_mock.assert_awaited_once()
+    text = send_mock.call_args[0][2]
+    assert "привязан" in text.lower()
+
+
+async def test_bot_handle_start_with_expired_code():
+    """`/start <expired>` → consume вернул None → шлём «код истёк»."""
+    from app.telegram_bot import _handle_message
+
+    client_mock = AsyncMock()
+    message = {"chat": {"id": 555}, "text": "/start dead"}
+
+    with (
+        patch("app.telegram_bot.consume_tg_link_code", new=AsyncMock(return_value=None)),
+        patch("app.telegram_bot._link_user", new=AsyncMock()) as link_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_message(client_mock, message)
+
+    link_mock.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "истёк" in text.lower() or "неверен" in text.lower()
+
+
+async def test_bot_handle_start_without_code_sends_help():
+    """`/start` без кода → шлём подсказку."""
+    from app.telegram_bot import _handle_message
+
+    client_mock = AsyncMock()
+    message = {"chat": {"id": 555}, "text": "/start"}
+
+    with (
+        patch("app.telegram_bot.consume_tg_link_code", new=AsyncMock()) as consume_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_message(client_mock, message)
+
+    consume_mock.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "/start" in text
+
+
+async def test_bot_handle_unrelated_text_ignored():
+    """Произвольный текст без `/start` — игнорируем, ничего не шлём."""
+    from app.telegram_bot import _handle_message
+
+    client_mock = AsyncMock()
+    message = {"chat": {"id": 555}, "text": "hi bot"}
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_message(client_mock, message)
+
+    send_mock.assert_not_awaited()
+
+
 async def test_threshold_enqueues_telegram_alert_on_trigger():
     """evaluate_system_metrics должен вызвать send_telegram_alert.delay после commit."""
     from app.models.alert_rule import ThresholdOperator

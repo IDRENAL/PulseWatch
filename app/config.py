@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     telegram_bot_token: str | None = None
     telegram_api_url: str = "https://api.telegram.org"
+    telegram_bot_username: str | None = (
+        None  # без @, нужен для deep-link https://t.me/<u>?start=<code>
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
