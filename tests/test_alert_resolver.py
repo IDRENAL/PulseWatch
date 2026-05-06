@@ -1,4 +1,4 @@
-"""Тесты авто-резолва системных алертов."""
+"""Тесты авто-резолва алертов (system + docker)."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -8,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import Base
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
+from app.models.docker_metric import DockerMetric
 from app.models.metric import Metric
 from app.models.server import Server
 from app.models.user import User
-from app.services.alert_resolver import auto_resolve_system_alerts
+from app.services.alert_resolver import (
+    auto_resolve_docker_alerts,
+    auto_resolve_system_alerts,
+)
 
 
 @pytest_asyncio.fixture
@@ -152,3 +156,142 @@ async def test_resolves_multiple_events_in_one_pass(db_session: AsyncSession, se
     resolved = await auto_resolve_system_alerts(db_session)
 
     assert set(resolved) == {event1.id, event2.id}
+
+
+# ─── Docker auto-resolve ────────────────────────────────────────────────────
+
+
+async def _make_docker_rule(
+    db: AsyncSession,
+    server_id: int,
+    owner_id: int,
+    container_name: str | None = None,
+    threshold: float = 80.0,
+) -> AlertRule:
+    rule = AlertRule(
+        server_id=server_id,
+        owner_id=owner_id,
+        name="container cpu high",
+        metric_type=MetricType.docker,
+        metric_field="cpu_percent",
+        operator=ThresholdOperator.gt,
+        threshold_value=threshold,
+        container_name=container_name,
+        cooldown_seconds=0,
+        is_active=True,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return rule
+
+
+async def _make_docker_event(
+    db: AsyncSession, rule: AlertRule, server_id: int, container_name: str, value: float
+) -> AlertEvent:
+    event = AlertEvent(
+        rule_id=rule.id,
+        server_id=server_id,
+        container_name=container_name,
+        metric_value=value,
+        threshold_value=rule.threshold_value,
+        message="docker test",
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
+async def _add_docker_metric(
+    db: AsyncSession,
+    server_id: int,
+    container_name: str,
+    cpu: float,
+    when: datetime | None = None,
+) -> DockerMetric:
+    metric = DockerMetric(
+        server_id=server_id,
+        container_id=f"id-{container_name}",
+        container_name=container_name,
+        image="nginx:latest",
+        status="running",
+        cpu_percent=cpu,
+        memory_usage_mb=10.0,
+        collected_at=when or datetime.now(UTC),
+    )
+    db.add(metric)
+    await db.commit()
+    return metric
+
+
+async def test_docker_resolves_when_metric_below_threshold(
+    db_session: AsyncSession, server_with_user
+):
+    server, user = server_with_user
+    rule = await _make_docker_rule(db_session, server.id, user.id, threshold=80.0)
+    event = await _make_docker_event(db_session, rule, server.id, "web-1", value=95.0)
+    await _add_docker_metric(db_session, server.id, "web-1", cpu=20.0)
+
+    resolved = await auto_resolve_docker_alerts(db_session)
+
+    assert event.id in resolved
+    await db_session.refresh(event)
+    assert event.resolved_at is not None
+
+
+async def test_docker_does_not_resolve_when_other_container_dropped(
+    db_session: AsyncSession, server_with_user
+):
+    """Метрика упала у ДРУГОГО контейнера — событие нашего контейнера остаётся открытым."""
+    server, user = server_with_user
+    rule = await _make_docker_rule(db_session, server.id, user.id, threshold=80.0)
+    event = await _make_docker_event(db_session, rule, server.id, "web-1", value=95.0)
+    # web-2 пришла с низким CPU, но события на web-2 нет — оно не должно влиять
+    await _add_docker_metric(db_session, server.id, "web-2", cpu=5.0)
+    # web-1 всё ещё горячий
+    await _add_docker_metric(db_session, server.id, "web-1", cpu=92.0)
+
+    resolved = await auto_resolve_docker_alerts(db_session)
+
+    assert event.id not in resolved
+    await db_session.refresh(event)
+    assert event.resolved_at is None
+
+
+async def test_docker_skips_event_without_container_name(
+    db_session: AsyncSession, server_with_user
+):
+    """Старые docker-события без container_name пропускаем."""
+    server, user = server_with_user
+    rule = await _make_docker_rule(db_session, server.id, user.id, threshold=80.0)
+    event = AlertEvent(
+        rule_id=rule.id,
+        server_id=server.id,
+        container_name=None,  # старое событие до миграции
+        metric_value=95.0,
+        threshold_value=80.0,
+        message="legacy",
+    )
+    db_session.add(event)
+    await db_session.commit()
+    await db_session.refresh(event)
+
+    resolved = await auto_resolve_docker_alerts(db_session)
+
+    assert event.id not in resolved
+
+
+async def test_docker_does_not_resolve_when_no_metric_for_container(
+    db_session: AsyncSession, server_with_user
+):
+    """У контейнера нет данных → не резолвим."""
+    server, user = server_with_user
+    rule = await _make_docker_rule(db_session, server.id, user.id, threshold=80.0)
+    event = await _make_docker_event(db_session, rule, server.id, "web-1", value=95.0)
+    # Метрики только для другого контейнера
+    await _add_docker_metric(db_session, server.id, "other", cpu=20.0)
+
+    resolved = await auto_resolve_docker_alerts(db_session)
+
+    assert event.id not in resolved

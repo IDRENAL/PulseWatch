@@ -12,6 +12,7 @@ class AlertEventRead(BaseModel):
     metric_value: float
     threshold_value: float
     message: str
+    container_name: str | None = None
     created_at: datetime
     resolved_at: datetime | None = None
 
