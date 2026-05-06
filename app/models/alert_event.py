@@ -19,5 +19,7 @@ class AlertEvent(Base):
     metric_value: Mapped[float] = mapped_column(Float, nullable=False)
     threshold_value: Mapped[float] = mapped_column(Float, nullable=False)
     message: Mapped[str] = mapped_column(String(500), nullable=False)
+    # container_name заполняется только для docker-правил, иначе NULL
+    container_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -155,6 +155,7 @@ async def evaluate_docker_metrics(
             server_id=server_id,
             metric_value=value,
             threshold_value=rule.threshold_value,
+            container_name=container_name,
             message=(
                 f"{rule.name}: {container_name} {rule.metric_field}={value} "
                 f"{rule.operator.value} {rule.threshold_value}"
