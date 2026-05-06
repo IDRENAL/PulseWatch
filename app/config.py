@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+    telegram_bot_token: str | None = None
+    telegram_api_url: str = "https://api.telegram.org"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

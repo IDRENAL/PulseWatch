@@ -10,7 +10,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.database import get_db
 from app.models.user import User
 from app.schemas.token import Token
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import TelegramLink, UserCreate, UserRead
 
 router = APIRouter()
 
@@ -78,4 +78,17 @@ async def login(
 
 @router.get("/me", response_model=UserRead)
 async def read_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.patch("/me/telegram", response_model=UserRead)
+async def link_telegram(
+    data: TelegramLink,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+
+    current_user.telegram_chat_id = data.chat_id
+    await db.commit()
+    await db.refresh(current_user)
     return current_user
