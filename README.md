@@ -31,6 +31,7 @@ Self-hosted система мониторинга серверов: агенты
 - **Postgres** — хранит юзеров (с привязкой к Telegram-чату), серверы, raw-метрики (24ч), агрегаты (`metric_aggregates`, `docker_aggregates`), алерт-правила и события.
 - **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), Celery broker (db=1) и backend (db=2).
 - **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов, отправка уведомлений в Telegram.
+- **Telegram bot** — отдельный long-polling процесс, обрабатывает `/start <код>` для привязки чата к юзеру. Одноразовые коды живут в Redis с TTL 10 мин.
 
 ## Стек
 
@@ -57,7 +58,7 @@ Self-hosted система мониторинга серверов: агенты
 cp .env.example .env
 # отредактируй DB_PASSWORD, SECRET_KEY (для SECRET_KEY: python -c "import secrets; print(secrets.token_urlsafe(32))")
 
-# 2. Поднять стек (Postgres + Redis + backend + Celery worker + Celery beat)
+# 2. Поднять стек (Postgres + Redis + backend + Celery worker + Celery beat + Telegram bot)
 make up
 
 # 3. Прогнать миграции
@@ -83,7 +84,7 @@ curl -X POST http://localhost:8000/servers/register \
 
 Сервис доступен на `http://localhost:8000`. OpenAPI: `http://localhost:8000/docs`.
 
-> Контейнеры `worker` и `beat` (Celery) поднимаются автоматически вместе с `app`. Если работаешь локально без Docker — запусти их вручную: `uv run celery -A app.tasks.celery_app worker -l info` и `uv run celery -A app.tasks.celery_app beat -l info` в разных терминалах.
+> Контейнеры `worker` + `beat` (Celery) и `bot` (Telegram long-polling) поднимаются автоматически вместе с `app`. Локально без Docker запускай их вручную в отдельных терминалах: `uv run celery -A app.tasks.celery_app worker -l info`, `uv run celery -A app.tasks.celery_app beat -l info`, `uv run python -m app.telegram_bot`.
 
 ## Переменные окружения
 
@@ -95,6 +96,7 @@ curl -X POST http://localhost:8000/servers/register \
 | `ALGORITHM` | Алгоритм JWT (по умолчанию `HS256`) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | TTL access-токена |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от `@BotFather`. Опционально — если пусто, уведомления отключены |
+| `TELEGRAM_BOT_USERNAME` | Username бота (без `@`). Нужен только для deep-link в `/auth/me/telegram/code` |
 | `AGENT_API_URL` | URL бэкенда для агента |
 | `AGENT_API_KEY` | API-ключ от `/servers/register`, формат `<server_id>.<secret>` |
 | `AGENT_SEND_INTERVAL_SECONDS` | Период отправки метрик (по умолчанию 10с) |
@@ -107,7 +109,8 @@ curl -X POST http://localhost:8000/servers/register \
 - `POST /auth/register` — регистрация юзера. Лимит **3/min на IP**.
 - `POST /auth/login` — логин (form-encoded). Лимит **5/min на IP**.
 - `GET /auth/me` — текущий юзер.
-- `PATCH /auth/me/telegram` — привязать/отвязать Telegram chat_id. Тело: `{"chat_id": "12345"}` или `{"chat_id": null}`.
+- `POST /auth/me/telegram/code` — генерит одноразовый код привязки + deep-link `https://t.me/<bot>?start=<code>` (TTL 10 мин). Юзер шлёт `/start <code>` боту → бот ставит chat_id.
+- `PATCH /auth/me/telegram` — ручная привязка/отвязка chat_id (для скриптов). Тело: `{"chat_id": "12345"}` или `{"chat_id": null}`.
 
 ### Серверы
 - `POST /servers/register` — создать сервер, получить API-ключ.
@@ -151,19 +154,41 @@ curl -X POST http://localhost:8000/servers/register \
 ## Telegram-уведомления
 
 1. Создай бота через [`@BotFather`](https://t.me/BotFather) (`/newbot` → имя → username с суффиксом `bot`). Получишь токен формата `7234567890:AAH...`.
-2. Добавь токен в `.env`: `TELEGRAM_BOT_TOKEN=7234567890:AAH...`
-3. Перезапусти стек (`make down && make up`) — без токена фича выключена молча.
-4. Узнай свой `chat_id`. Самый быстрый способ — написать боту [`@userinfobot`](https://t.me/userinfobot), он ответит твоим ID. **Перед этим напиши своему боту любое сообщение** (например, `/start`), иначе он не сможет тебе писать.
-5. Привяжи `chat_id` к юзеру:
-   ```bash
-   curl -X PATCH http://localhost:8000/auth/me/telegram \
-     -H "Authorization: Bearer <JWT>" \
-     -H "Content-Type: application/json" \
-     -d '{"chat_id":"123456789"}'
+2. Добавь в `.env`:
    ```
-6. Создай алерт-правило с низким порогом и подожди следующую метрику от агента — бот напишет в чат.
+   TELEGRAM_BOT_TOKEN=7234567890:AAH...
+   TELEGRAM_BOT_USERNAME=мой_бот   # без @, для генерации deep-link
+   ```
+3. Перезапусти стек (`make down && make up`) — поднимется отдельный сервис `bot` с long-polling. Без токена бот в логах напишет «не задан» и завершится — это нормально.
 
-Отвязать chat_id: `PATCH /auth/me/telegram` с телом `{"chat_id": null}`.
+### Способ 1 — привязка через `/start <код>` (рекомендуемый)
+
+Юзер заходит в свой PulseWatch-аккаунт, генерит одноразовый код, отправляет его боту:
+
+```bash
+# 1. Получить код (TTL 10 мин)
+curl -X POST http://localhost:8000/auth/me/telegram/code \
+  -H "Authorization: Bearer <JWT>"
+# → {"code": "a1b2c3d4", "deep_link": "https://t.me/мой_бот?start=a1b2c3d4", "expires_in_seconds": 600}
+
+# 2. Открыть deep_link → Telegram → нажать «START» (бот автоматически пошлёт /start a1b2c3d4)
+#    Бот ответит «✅ Аккаунт привязан».
+```
+
+### Способ 2 — ручная привязка по `chat_id`
+
+Полезно для скриптов/админки. Юзер сам узнаёт свой chat_id (например, через [`@userinfobot`](https://t.me/userinfobot)) и шлёт PATCH:
+
+```bash
+curl -X PATCH http://localhost:8000/auth/me/telegram \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"chat_id":"123456789"}'
+```
+
+Отвязка (любой способ): `PATCH /auth/me/telegram` с телом `{"chat_id": null}`.
+
+После привязки создай алерт-правило с низким порогом и подожди следующую метрику от агента — бот напишет в чат.
 
 ## Установка агента на наблюдаемый сервер
 
@@ -237,6 +262,7 @@ app/
   services/   # бизнес-логика (threshold, aggregation, alert_resolver, telegram)
   tasks/      # Celery задачи (агрегация, heartbeat, notification, resolve)
   utils/      # стриминг CSV
+  telegram_bot.py  # long-polling процесс для /start <код>
 agent/
   collectors/ # system (psutil), docker (SDK), logs (journald)
   agent.py, sender.py, logs_streamer.py
@@ -247,10 +273,10 @@ docs/         # планы этапов
 
 ## Известные ограничения / TODO
 
-- Привязка Telegram сейчас ручная (юзер сам узнаёт `chat_id` через `@userinfobot`). Удобнее было бы через `/start <код>` — этот flow требует отдельного процесса polling/webhook.
 - Auto-resolve работает только для системных алертов. Docker-резолв не реализован — у `AlertEvent` нет колонки `container_name`, чтобы понять метрики какого контейнера перепроверять.
 - Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
 - Email-уведомления не реализованы (только Telegram).
+- Telegram-бот отвечает только на `/start <код>` — никаких других команд (статус, список серверов, отписка) пока нет.
 
 ## Лицензия
 
