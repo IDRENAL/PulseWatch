@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from redis.asyncio import Redis
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -45,6 +46,12 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi stub typing
 app.include_router(websocket_router, tags=["websocket"])
 app.include_router(ws_metrics_router, tags=["ws-metrics"])
+
+# Prometheus-инструментация: middleware считает запросы/латентность,
+# дамп отдаётся на /metrics/prometheus (нельзя /metrics — занят ingest-роутером)
+Instrumentator().instrument(app).expose(
+    app, endpoint="/metrics/prometheus", include_in_schema=False
+)
 
 
 @app.get("/health")

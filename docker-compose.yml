@@ -95,6 +95,36 @@ services:
     environment: *app-env
     command: ["python", "-m", "app.telegram_bot"]
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pulsewatch_prometheus
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pulsewatch_grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:

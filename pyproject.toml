@@ -22,6 +22,7 @@ dependencies = [
     "websockets>=16.0",
     "slowapi>=0.1.9",
     "aiosmtplib>=5.1.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
 ]
 
 [dependency-groups]

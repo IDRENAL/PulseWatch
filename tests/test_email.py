@@ -162,7 +162,7 @@ def test_send_email_alert_skips_when_user_disabled_email():
     with (
         patch("app.database.async_session_factory", return_value=cm),
         patch("app.tasks.notification_tasks.Redis.from_url", return_value=_fake_redis()),
-        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=False)),
+        patch("app.tasks.notification_tasks.is_channel_muted", new=AsyncMock(return_value=False)),
         patch("app.tasks.notification_tasks.send_email", new=AsyncMock()) as send_mock,
     ):
         send_email_alert(event_id=1)
@@ -177,7 +177,7 @@ def test_send_email_alert_skips_when_server_muted():
     with (
         patch("app.database.async_session_factory", return_value=cm),
         patch("app.tasks.notification_tasks.Redis.from_url", return_value=_fake_redis()),
-        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=True)),
+        patch("app.tasks.notification_tasks.is_channel_muted", new=AsyncMock(return_value=True)),
         patch("app.tasks.notification_tasks.send_email", new=AsyncMock()) as send_mock,
     ):
         send_email_alert(event_id=1)
@@ -192,7 +192,7 @@ def test_send_email_alert_happy_path_uses_user_email():
     with (
         patch("app.database.async_session_factory", return_value=cm),
         patch("app.tasks.notification_tasks.Redis.from_url", return_value=_fake_redis()),
-        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=False)),
+        patch("app.tasks.notification_tasks.is_channel_muted", new=AsyncMock(return_value=False)),
         patch("app.tasks.notification_tasks.send_email", new=AsyncMock()) as send_mock,
     ):
         send_email_alert(event_id=1)
@@ -213,7 +213,7 @@ def test_send_email_alert_skips_when_smtp_not_configured():
     with (
         patch("app.database.async_session_factory", return_value=cm),
         patch("app.tasks.notification_tasks.Redis.from_url", return_value=_fake_redis()),
-        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=False)),
+        patch("app.tasks.notification_tasks.is_channel_muted", new=AsyncMock(return_value=False)),
         patch(
             "app.tasks.notification_tasks.send_email",
             new=AsyncMock(side_effect=EmailNotConfiguredError("not set")),

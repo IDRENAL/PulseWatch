@@ -89,29 +89,58 @@ async def consume_tg_link_code(code: str) -> int | None:
     return int(raw_user_id)
 
 
-# ─── Mute (общая заглушка уведомлений на сервер для всех каналов) ───────────
+# ─── Per-channel mute (заглушка уведомлений по каналам) ─────────────────────
+
+MUTE_CHANNELS = ("telegram", "email")
 
 
-def _mute_key(server_id: int) -> str:
-    return f"mute:{server_id}"
+def _mute_key(server_id: int, channel: str) -> str:
+    return f"mute:{server_id}:{channel}"
 
 
-async def set_server_mute(server_id: int, minutes: int) -> None:
-    """Глушит уведомления для сервера на N минут (Redis SETEX). Применяется
-    ко всем каналам — Telegram, email и т.д.
+async def set_channel_mute(server_id: int, channel: str, minutes: int) -> None:
+    """Глушит конкретный канал уведомлений для сервера на N минут (Redis SETEX)."""
+    r = _get_app_redis()
+    await r.set(_mute_key(server_id, channel), "1", ex=minutes * 60)
+
+
+async def is_channel_muted(server_id: int, channel: str) -> bool:
+    """True, если активна заглушка для (server, channel)."""
+    r = _get_app_redis()
+    return await r.exists(_mute_key(server_id, channel)) == 1
+
+
+async def get_channel_mute_ttl(server_id: int, channel: str) -> int | None:
+    """TTL заглушки конкретного канала в секундах или None если её нет."""
+    r = _get_app_redis()
+    ttl = await r.ttl(_mute_key(server_id, channel))
+    return ttl if ttl > 0 else None
+
+
+# ─── Pending delete confirmation (бот /delete) ──────────────────────────────
+
+_PENDING_DELETE_TTL_SECONDS = 60
+
+
+def _pending_delete_key(chat_id: int) -> str:
+    return f"pending_delete:{chat_id}"
+
+
+async def set_pending_delete(chat_id: int, server_id: int) -> None:
+    """Запоминает намерение удалить сервер на 60с. Ключ — chat_id (один pending на чат)."""
+    r = _get_app_redis()
+    await r.set(_pending_delete_key(chat_id), str(server_id), ex=_PENDING_DELETE_TTL_SECONDS)
+
+
+async def consume_pending_delete(chat_id: int, server_id: int) -> bool:
+    """Проверяет, что pending для chat_id совпадает с server_id, и удаляет ключ.
+
+    Returns True если совпало (можно удалять), False если нет/истёк.
     """
     r = _get_app_redis()
-    await r.set(_mute_key(server_id), "1", ex=minutes * 60)
-
-
-async def is_server_muted(server_id: int) -> bool:
-    """True, если активна заглушка для сервера."""
-    r = _get_app_redis()
-    return await r.exists(_mute_key(server_id)) == 1
-
-
-async def get_mute_ttl(server_id: int) -> int | None:
-    """TTL заглушки в секундах или None если её нет."""
-    r = _get_app_redis()
-    ttl = await r.ttl(_mute_key(server_id))
-    return ttl if ttl > 0 else None
+    key = _pending_delete_key(chat_id)
+    pipe = r.pipeline()
+    pipe.get(key)
+    pipe.delete(key)
+    raw, _ = await pipe.execute()
+    return raw is not None and int(raw) == server_id
