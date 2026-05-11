@@ -261,6 +261,31 @@ tr:hover td {
     gap: 8px;
 }
 
+.rule-form {
+    background: #181825;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 16px 0;
+    max-width: 480px;
+}
+
+.rule-form label {
+    margin-bottom: 10px;
+}
+
+.rule-channels {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+}
+
+.rule-channels span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
 #logs-stream {
     height: 480px;
     overflow-y: auto;
