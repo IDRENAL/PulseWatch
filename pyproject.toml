@@ -23,6 +23,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "aiosmtplib>=5.1.0",
     "prometheus-fastapi-instrumentator>=7.0.0",
+    "pyotp>=2.9.0",
 ]
 
 [dependency-groups]

@@ -25,6 +25,21 @@ class EmailAlertsToggle(BaseModel):
     enabled: bool
 
 
+class TotpSetupResponse(BaseModel):
+    """Ответ /auth/me/totp/setup: secret и otpauth-URL для QR."""
+
+    secret: str
+    otpauth_url: str
+
+
+class TotpVerifyRequest(BaseModel):
+    code: str
+
+
+class TotpDisableRequest(BaseModel):
+    password: str
+
+
 class TelegramLink(BaseModel):
     chat_id: str | None
 
