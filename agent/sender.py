@@ -3,10 +3,17 @@ from loguru import logger
 
 
 class MetricsSender:
-    def __init__(self, api_url: str, api_key: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: float = 5.0,
+        agent_version: str | None = None,
+    ) -> None:
         self._base_url = api_url.rstrip("/")
         self._headers = {"X-API-Key": api_key}
         self._client = httpx.AsyncClient(timeout=timeout)
+        self._agent_version = agent_version
 
     async def _post(self, path: str, payload) -> bool:
         url = f"{self._base_url}{path}"
@@ -28,6 +35,9 @@ class MetricsSender:
         return False
 
     async def send(self, payload: dict) -> bool:
+        # Подмешиваем версию агента — бэкенд апдейтит servers.agent_version при изменении
+        if self._agent_version is not None:
+            payload = {**payload, "agent_version": self._agent_version}
         return await self._post("/metrics", payload)
 
     async def send_docker(self, payload: list[dict]) -> bool:

@@ -13,6 +13,7 @@ class ServerRead(BaseModel):
     is_active: bool
     created_at: datetime
     last_seen_at: datetime | None
+    agent_version: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

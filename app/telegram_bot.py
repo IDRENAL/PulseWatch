@@ -39,6 +39,8 @@ _MUTE_PATTERN = re.compile(
 )
 _TOGGLE_PATTERN = re.compile(r"^/toggle\s+(?P<rule_id>\d+)\s*$")
 _DELETE_PATTERN = re.compile(r"^/delete\s+(?P<server_id>\d+)(?P<confirm>\s+confirm)?\s*$")
+_EVENTS_PATTERN = re.compile(r"^/events(?:\s+(?P<server_id>\d+))?\s*$")
+_EVENTS_LIMIT = 10
 
 
 def _bot_url(method: str) -> str:
@@ -103,9 +105,10 @@ async def _handle_start(client: httpx.AsyncClient, chat_id: int, text: str) -> N
             "✅ Аккаунт привязан. Теперь алерты будут приходить сюда.\n"
             "Команды:\n"
             "  /status, /servers\n"
-            "  /mute <server_id> <minutes>\n"
+            "  /mute <server_id> <minutes> [telegram|email|all]\n"
             "  /rules, /toggle <rule_id>\n"
-            "  /delete <server_id>",
+            "  /delete <server_id>\n"
+            "  /events [server_id]",
         )
     else:
         await _send(client, chat_id, "❌ Юзер не найден. Возможно, аккаунт удалён.")
@@ -340,6 +343,49 @@ async def _handle_delete(client: httpx.AsyncClient, chat_id: int, user: User, te
         await _send(client, chat_id, f"🗑 Сервер #{server_id} «{server_name}» удалён.")
 
 
+# ─── Команда /events [server_id] — последние срабатывания ──────────────────
+
+
+async def _handle_events(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
+    match = _EVENTS_PATTERN.match(text)
+    if not match:
+        await _send(client, chat_id, "Использование: /events [server_id]")
+        return
+
+    server_id_raw = match.group("server_id")
+    server_id = int(server_id_raw) if server_id_raw else None
+
+    stmt = (
+        select(AlertEvent, AlertRule.name, Server.name)
+        .join(AlertRule, AlertRule.id == AlertEvent.rule_id)
+        .join(Server, Server.id == AlertEvent.server_id)
+        .where(Server.owner_id == user.id)
+        .order_by(AlertEvent.created_at.desc())
+        .limit(_EVENTS_LIMIT)
+    )
+    if server_id is not None:
+        stmt = stmt.where(AlertEvent.server_id == server_id)
+
+    async with async_session_factory() as db:
+        rows = (await db.execute(stmt)).tuples().all()
+
+    if not rows:
+        suffix = f" для сервера #{server_id}" if server_id else ""
+        await _send(client, chat_id, f"Событий{suffix} нет.")
+        return
+
+    header = f"📜 Последние события (для #{server_id})" if server_id else "📜 Последние события"
+    lines = [f"{header}, всего {len(rows)}:"]
+    for event, rule_name, server_name in rows:
+        status = "✅resolved" if event.resolved_at else "🔥open"
+        ts = event.created_at.strftime("%m-%d %H:%M")
+        lines.append(
+            f"• #{event.id} [{server_name}] {rule_name}: "
+            f"{event.metric_value} (порог {event.threshold_value}) | {status} | {ts}"
+        )
+    await _send(client, chat_id, "\n".join(lines))
+
+
 # ─── Главный диспетчер ──────────────────────────────────────────────────────
 
 
@@ -382,15 +428,18 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
         await _handle_toggle(client, chat_id, user, text)
     elif text.startswith("/delete"):
         await _handle_delete(client, chat_id, user, text)
+    elif text.startswith("/events"):
+        await _handle_events(client, chat_id, user, text)
     else:
         await _send(
             client,
             chat_id,
             "Неизвестная команда. Доступные:\n"
             "  /status, /servers\n"
-            "  /mute <server_id> <minutes>\n"
+            "  /mute <server_id> <minutes> [telegram|email|all]\n"
             "  /rules, /toggle <rule_id>\n"
-            "  /delete <server_id>",
+            "  /delete <server_id>\n"
+            "  /events [server_id]",
         )
 
 

@@ -7,6 +7,7 @@ class MetricCreate(BaseModel):
     cpu_percent: float
     memory_percent: float
     disk_percent: float
+    agent_version: str | None = None
 
 
 class MetricRead(BaseModel):

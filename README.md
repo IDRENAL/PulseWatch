@@ -26,7 +26,7 @@ Self-hosted система мониторинга серверов: агенты
 
 **Кто за что отвечает:**
 
-- **Агент** — Python-процесс на наблюдаемом сервере. `psutil` для системных метрик, Docker SDK для контейнеров, journalctl для логов. Шлёт раз в 10 секунд через `httpx`.
+- **Агент** — Python-процесс на наблюдаемом сервере. `psutil` для системных метрик, Docker SDK для контейнеров, journalctl для логов. Шлёт раз в 10 секунд через `httpx`, в каждой системной метрике передаёт свою версию (`agent.__version__`) — бэкенд апдейтит `servers.agent_version` при изменении.
 - **Backend (FastAPI)** — приём метрик, JWT-аутентификация юзеров, API-ключи для агентов, REST + WebSocket эндпоинты.
 - **Postgres** — хранит юзеров (с настройками уведомлений: Telegram chat_id + флаг email_alerts_enabled), серверы, raw-метрики (24ч), агрегаты (`metric_aggregates`, `docker_aggregates`), алерт-правила и события.
 - **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), per-channel mute (`mute:<server_id>:<channel>`), pending-delete подтверждения, одноразовые коды привязки бота, Celery broker (db=1) и backend (db=2).
@@ -210,6 +210,7 @@ curl -X PATCH http://localhost:8000/auth/me/telegram \
 | `/rules` | Список твоих алерт-правил с состоянием on/off, оператором и порогом |
 | `/toggle <rule_id>` | Включает/выключает правило (флипает `is_active`) |
 | `/delete <server_id>` | **Двухступенчатое** удаление сервера со всеми его метриками/агрегатами/правилами/событиями. Бот просит подтверждение `/delete <id> confirm` в течение 60с |
+| `/events [server_id]` | Последние 10 алерт-событий (или по конкретному серверу) с пометкой open/resolved |
 
 Mute проверяется в `send_telegram_alert` и `send_email_alert` перед отправкой (каждый смотрит свой канал) — пока активна заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `GET /alerts/events`.
 
@@ -243,12 +244,12 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 Бэкенд отдаёт HTTP-метрики в Prometheus-формате на `/metrics/prometheus` (счётчики запросов, латентность, статус-коды — собираются через middleware `prometheus-fastapi-instrumentator`). В compose уже есть два готовых сервиса:
 
 - **`prometheus`** на `http://localhost:9090` — скрапит `app:8000/metrics/prometheus` раз в 15с. Конфиг в `prometheus.yml`.
-- **`grafana`** на `http://localhost:3000` — с pre-provisioned Prometheus-датасорсом. Дефолтные креды `admin`/`admin` (поменяй через `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` в `.env`).
+- **`grafana`** на `http://localhost:3000` — с pre-provisioned Prometheus-датасорсом **и готовым дашбордом** «PulseWatch — Backend HTTP» (4 панели: rps, latency p50/p95/p99, 5xx error rate, статус-коды). Дефолтные креды `admin`/`admin` (поменяй через `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` в `.env`).
 
 После `make up`:
 1. Открой Grafana → авторизуйся.
-2. **Connections → Data sources** — Prometheus уже подключён, проверь «Test».
-3. **Dashboards → New** — собирай графики из метрик типа `http_requests_total{job="pulsewatch"}`, `http_request_duration_seconds_bucket`, etc.
+2. **Dashboards** — увидишь готовый «PulseWatch — Backend HTTP».
+3. Свои дашборды клади в `grafana/provisioning/dashboards/` (JSON), они подхватятся автоматически.
 
 Первый запрос на `/metrics/prometheus` идёт через 15с после старта Prometheus, так что сразу после `up` метрик может ещё не быть — подожди минуту.
 
@@ -337,7 +338,6 @@ docs/         # планы этапов
 
 - Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
 - Refresh-токены не реализованы — access-token живёт `ACCESS_TOKEN_EXPIRE_MINUTES`, после истечения юзер логинится заново.
-- Pre-built Grafana дашборды не поставляются — есть только datasource. Добавь свои в `grafana/provisioning/dashboards/`.
 - Alertmanager не подключён — Prometheus-метрики только наблюдаемы, на их основе алертов нет (наши алерты живут отдельно в Postgres + Celery).
 
 ## Лицензия
