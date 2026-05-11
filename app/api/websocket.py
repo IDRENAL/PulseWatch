@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import authenticate_ws_agent, authenticate_ws_user
 from app.core.connection_manager import manager
 from app.database import get_db
+from app.models.log_entry import LogEntry
 from app.models.server import Server
 
 router = APIRouter()
@@ -58,6 +60,14 @@ async def ws_agent_logs(
     try:
         while True:
             log_line = await websocket.receive_text()
+            # Сохраняем + бродкастим. Commit per-line простой, но при высоком rps
+            # стоило бы батчить — TODO когда упрёмся в нагрузку.
+            try:
+                db.add(LogEntry(server_id=server.id, message=log_line))
+                await db.commit()
+            except Exception as exc:
+                await db.rollback()
+                logger.warning("log persist failed: {}", exc)
             await manager.broadcast(server.id, log_line)
     except WebSocketDisconnect:
         pass

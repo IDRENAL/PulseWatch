@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from_address: str | None = None
     smtp_use_tls: bool = True
+    # Сколько дней храним строки журнала в таблице logs. Старше — выкидывает
+    # ежесуточный Celery-beat task_prune_old_logs.
+    log_retention_days: int = 14
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
