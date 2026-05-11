@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Сколько дней храним строки журнала в таблице logs. Старше — выкидывает
     # ежесуточный Celery-beat task_prune_old_logs.
     log_retention_days: int = 14
+    # База для ссылок в письмах (reset-password и т.п.). Должен совпадать с тем
+    # как фронт-енд раздаётся пользователю.
+    frontend_base_url: str = "http://localhost:8000"
+    # TTL одноразового токена сброса пароля. По истечении ссылка протухнет.
+    password_reset_token_ttl_seconds: int = 3600
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

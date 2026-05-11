@@ -13,3 +13,12 @@ class TokenPayload(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str  # не EmailStr чтобы не подтверждать существование email-форматом ошибки
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str

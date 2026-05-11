@@ -232,6 +232,33 @@ async def clear_rule_draft(chat_id: int) -> None:
     await r.delete(_rule_draft_key(chat_id))
 
 
+# ─── Password reset: одноразовые токены ─────────────────────────────────────
+
+
+def _password_reset_key(token: str) -> str:
+    return f"pwd_reset:{token}"
+
+
+async def store_password_reset_token(token: str, user_id: int, ttl_seconds: int) -> None:
+    """Сохраняет токен → user_id на ttl_seconds."""
+    r = _get_app_redis()
+    await r.set(_password_reset_key(token), str(user_id), ex=ttl_seconds)
+
+
+async def consume_password_reset_token(token: str) -> int | None:
+    """Извлекает user_id по токену и сразу удаляет ключ (одноразовость).
+
+    Возвращает user_id или None если не нашли / истёк.
+    """
+    r = _get_app_redis()
+    key = _password_reset_key(token)
+    pipe = r.pipeline()
+    pipe.get(key)
+    pipe.delete(key)
+    raw, _ = await pipe.execute()
+    return int(raw) if raw is not None else None
+
+
 async def revoke_all_refresh_for_user(user_id: int) -> int:
     """Стирает все активные refresh-токены юзера. Возвращает число удалённых.
 
