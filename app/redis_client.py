@@ -204,6 +204,34 @@ async def rotate_refresh_jti(user_id: int, old_jti: str, new_jti: str, ttl_secon
     return False
 
 
+# ─── Bot: черновик правила в /createrule ────────────────────────────────────
+
+_RULE_DRAFT_TTL_SECONDS = 600  # 10 минут — диалог не должен затянуться
+
+
+def _rule_draft_key(chat_id: int) -> str:
+    return f"rule_draft:{chat_id}"
+
+
+async def set_rule_draft(chat_id: int, draft: dict) -> None:
+    """Сохраняет состояние черновика (step + накопленные поля) на 10 минут."""
+    r = _get_app_redis()
+    await r.set(_rule_draft_key(chat_id), json.dumps(draft), ex=_RULE_DRAFT_TTL_SECONDS)
+
+
+async def get_rule_draft(chat_id: int) -> dict | None:
+    """Возвращает текущий черновик или None если его нет/истёк."""
+    r = _get_app_redis()
+    raw = await r.get(_rule_draft_key(chat_id))
+    return json.loads(raw) if raw else None
+
+
+async def clear_rule_draft(chat_id: int) -> None:
+    """Удаляет черновик (cancel или после успешного создания)."""
+    r = _get_app_redis()
+    await r.delete(_rule_draft_key(chat_id))
+
+
 async def revoke_all_refresh_for_user(user_id: int) -> int:
     """Стирает все активные refresh-токены юзера. Возвращает число удалённых.
 
