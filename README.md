@@ -1,8 +1,8 @@
 # PulseWatch
 
-Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и email, отдаёт реал-тайм поток через WebSocket, а HTTP-метрики бэкенда отдаёт в Prometheus-формате для Grafana.
+Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и email, отдаёт реал-тайм поток через WebSocket в браузерный дашборд, а HTTP-метрики бэкенда отдаёт в Prometheus-формате для Grafana.
 
-Учебный проект, реализующий 7-этапный план разработки + хвостовые фичи поверх (telegram-бот с командами админки, email-канал, auto-resolve, per-channel mute, Prometheus/Grafana). В TODO остаётся только frontend-дашборд.
+Учебный проект, реализующий 7-этапный план разработки + хвостовые фичи поверх (telegram-бот с командами админки, email-канал, auto-resolve, per-channel mute, Prometheus/Grafana, refresh-токены, frontend-дашборд).
 
 ## Архитектура
 
@@ -32,7 +32,8 @@ Self-hosted система мониторинга серверов: агенты
 - **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), per-channel mute (`mute:<server_id>:<channel>`), pending-delete подтверждения, одноразовые коды привязки бота, Celery broker (db=1) и backend (db=2).
 - **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов (system + docker), отправка уведомлений в Telegram и email.
 - **Telegram bot** — отдельный long-polling процесс. Обрабатывает `/start <код>` для привязки чата к юзеру (одноразовые коды живут в Redis с TTL 10 мин) и команды админки: `/status`, `/servers`, `/rules`, `/toggle`, `/mute`, `/delete`.
-- **Prometheus + Grafana** *(опционально)* — Prometheus скрапит `/metrics/prometheus` на бэкенде каждые 15с (счётчики запросов, латентность, статусы). Grafana с pre-provisioned Prometheus-датасорсом ждёт твои дашборды.
+- **Prometheus + Grafana** *(опционально)* — Prometheus скрапит `/metrics/prometheus` на бэкенде каждые 15с (счётчики запросов, латентность, статусы). Grafana с pre-provisioned Prometheus-датасорсом и готовым дашбордом «PulseWatch — Backend HTTP».
+- **Frontend** — статика (vanilla JS + Chart.js через CDN) в `static/`, FastAPI отдаёт `/` → `index.html`. Login, список серверов, реал-тайм график (CPU/RAM/Disk через WebSocket) — без билда и npm.
 
 ## Стек
 
@@ -256,6 +257,20 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 
 Первый запрос на `/metrics/prometheus` идёт через 15с после старта Prometheus, так что сразу после `up` метрик может ещё не быть — подожди минуту.
 
+## Frontend dashboard
+
+Браузерный дашборд лежит в `static/` — три файла (`index.html`, `style.css`, `app.js`) без билда и без npm. Chart.js подключён через CDN (`cdn.jsdelivr.net`).
+
+FastAPI монтирует `/static` и отдаёт `index.html` на корневой URL (`GET /`). Открой `http://localhost:8000/` — увидишь форму логина → дашборд со списком твоих серверов → клик на карточку → реал-тайм график последних 60 точек метрик.
+
+Что реализовано в `static/app.js`:
+
+- **Токены в `localStorage`** под ключом `pulsewatch.tokens` (access + refresh).
+- **`apiFetch`** — обёртка над `fetch`, навешивает `Authorization: Bearer <access>`, на 401 атомарно ходит на `/auth/refresh`, обновляет пару, повторяет запрос. Если refresh тоже мёртв — выкидывает на login-форму.
+- **WebSocket** на `/ws/metrics/{id}?token=<access>` — новые точки добавляются в график без перезагрузки, скользящее окно на 60 точек. На close с кодом 1008 (auth refused) пробуем refresh и переподключаемся один раз.
+
+Тестов на фронтенд нет — pytest не покрывает JS. Проверка ручная через браузер.
+
 ## Установка агента на наблюдаемый сервер
 
 ```bash
@@ -322,16 +337,18 @@ make agent
 ```
 app/
   api/        # FastAPI роутеры
-  core/       # security, rate_limit, connection manager
+  core/       # security (JWT access+refresh), rate_limit, connection manager
   models/     # SQLAlchemy модели
   schemas/    # Pydantic-схемы (вход/выход)
   services/   # бизнес-логика (threshold, aggregation, alert_resolver, telegram, email_alert)
   tasks/      # Celery задачи (агрегация, heartbeat, notification, resolve)
   utils/      # стриминг CSV
-  telegram_bot.py  # long-polling процесс для /start <код>
+  telegram_bot.py  # long-polling процесс для бота
 agent/
   collectors/ # system (psutil), docker (SDK), logs (journald)
-  agent.py, sender.py, logs_streamer.py
+  agent.py, sender.py, logs_streamer.py, __init__.py (__version__)
+static/       # frontend: index.html, app.js, style.css (vanilla JS + Chart.js)
+grafana/      # provisioning datasources/dashboards
 alembic/      # миграции
 tests/
 docs/         # планы этапов
@@ -339,9 +356,10 @@ docs/         # планы этапов
 
 ## Известные ограничения / TODO
 
-- Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
+- Frontend — только базовая страница: login, список серверов, график одного сервера. Нет страниц правил, событий, агрегатов, логов. Это всё доступно через API/бот, но не через UI.
 - Reuse-detection для refresh-токенов не реализован — при ротации старый jti инвалидируется, но мы не отзываем **все** сессии юзера при попытке использовать «украденный» (повторно использованный) токен. Если параноидально — добавить отдельный «used» ключ с TTL.
 - Alertmanager не подключён — Prometheus-метрики только наблюдаемы, на их основе алертов нет (наши алерты живут отдельно в Postgres + Celery).
+- Тестов на фронтенд нет — JS не покрывается pytest. Можно добавить Playwright/Cypress, но это отдельная подготовка.
 
 ## Лицензия
 
