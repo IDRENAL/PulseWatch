@@ -23,6 +23,7 @@ async def _run_heartbeat_check() -> None:
 
     from app.database import async_session_factory
     from app.models.server import Server
+    from app.tasks.notification_tasks import send_heartbeat_down, send_heartbeat_recovery
 
     threshold = datetime.now(UTC) - timedelta(minutes=5)
 
@@ -37,14 +38,20 @@ async def _run_heartbeat_check() -> None:
         deactivated = result.all()
 
         # Помечаем активные серверы (если снова появились)
-        await db.execute(
+        result = await db.execute(
             update(Server)
             .where(Server.last_seen_at >= threshold, Server.is_active == False)
             .values(is_active=True)
             .returning(Server.id, Server.name)
         )
+        recovered = result.all()
 
         await db.commit()
 
         for server_id, name in deactivated:
             logger.warning("Сервер '{}' (id={}) помечен как неактивный", name, server_id)
+            send_heartbeat_down.delay(server_id)
+
+        for server_id, name in recovered:
+            logger.info("Сервер '{}' (id={}) снова активен", name, server_id)
+            send_heartbeat_recovery.delay(server_id)

@@ -194,3 +194,69 @@ def _format_text(event: AlertEvent, rule: AlertRule, server: Server) -> str:
         f"Threshold: {rule.operator.value} {event.threshold_value}\n"
         f"Time: {event.created_at.isoformat()}\n"
     )
+
+
+# ─── Heartbeat-уведомления (server down / recovered) ────────────────────────
+
+
+@celery_app.task(name="app.tasks.notification_tasks.send_heartbeat_down")
+def send_heartbeat_down(server_id: int) -> None:
+    """Шлёт владельцу сервера сообщение о том, что сервер замолчал."""
+    asyncio.run(_send_heartbeat(server_id, recovered=False))
+
+
+@celery_app.task(name="app.tasks.notification_tasks.send_heartbeat_recovery")
+def send_heartbeat_recovery(server_id: int) -> None:
+    """Шлёт владельцу сервера сообщение о том, что сервер снова в строю."""
+    asyncio.run(_send_heartbeat(server_id, recovered=True))
+
+
+async def _send_heartbeat(server_id: int, recovered: bool) -> None:
+    from app.database import async_session_factory
+
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    set_redis_client(redis)
+    try:
+        async with async_session_factory() as db:
+            stmt = (
+                select(Server, User)
+                .join(User, Server.owner_id == User.id)
+                .where(Server.id == server_id)
+            )
+            row = (await db.execute(stmt)).first()
+
+        if row is None:
+            logger.warning("heartbeat notify: server id={} not found", server_id)
+            return
+        server, user = row
+
+        emoji, status_text = ("✅", "снова в строю") if recovered else ("⚠️", "не отвечает")
+        last_seen = server.last_seen_at.isoformat() if server.last_seen_at else "ни разу"
+
+        # Telegram — если привязан chat_id
+        if user.telegram_chat_id:
+            tg_text = (
+                f"{emoji} <b>Сервер {html.escape(server.name)} {status_text}</b>\n"
+                f"id: <code>{server.id}</code>\n"
+                f"last seen: {html.escape(last_seen)}"
+            )
+            try:
+                await send_message(user.telegram_chat_id, tg_text)
+            except (TelegramNotConfiguredError, TelegramSendError) as exc:
+                logger.info("heartbeat tg send skipped: {}", exc)
+
+        # Email — если включены email-уведомления
+        if user.email_alerts_enabled:
+            subject = f"[PulseWatch] {server.name} {status_text}"
+            html_body = (
+                f"<p>{emoji} <b>{html.escape(server.name)}</b> {status_text}.</p>"
+                f"<p>last seen: {html.escape(last_seen)}</p>"
+            )
+            text_body = f"{emoji} {server.name} {status_text}. last seen: {last_seen}"
+            try:
+                await send_email(user.email, subject, html_body, text_body)
+            except (EmailNotConfiguredError, EmailSendError) as exc:
+                logger.info("heartbeat email send skipped: {}", exc)
+    finally:
+        await redis.aclose()
+        set_redis_client(None)
