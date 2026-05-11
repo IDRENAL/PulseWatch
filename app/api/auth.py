@@ -20,14 +20,16 @@ from app.core.security import (
 from app.database import get_db
 from app.models.user import User
 from app.redis_client import (
+    consume_password_reset_token,
     is_refresh_jti_used,
     revoke_all_refresh_for_user,
     revoke_refresh_jti,
     rotate_refresh_jti,
+    store_password_reset_token,
     store_refresh_jti,
     store_tg_link_code,
 )
-from app.schemas.token import RefreshRequest, Token
+from app.schemas.token import ForgotPasswordRequest, RefreshRequest, ResetPasswordRequest, Token
 from app.schemas.user import (
     EmailAlertsToggle,
     TelegramLink,
@@ -176,6 +178,81 @@ async def refresh_tokens(request: Request, data: RefreshRequest):
         raise creds_exc
 
     return Token(access_token=new_access, refresh_token=new_refresh, token_type="bearer")
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+@limiter.limit("3/minute")
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Принимает email, всегда возвращает 200 (не раскрываем какие email существуют).
+
+    Если юзер найден — генерит одноразовый токен, кладёт в Redis с TTL, отправляет
+    email со ссылкой `<FRONTEND_BASE_URL>/reset-password?token=<token>`.
+    """
+    user = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
+    if user is not None:
+        token = secrets.token_urlsafe(32)
+        await store_password_reset_token(token, user.id, settings.password_reset_token_ttl_seconds)
+        # Best-effort отправка письма. Если SMTP не настроен — лог + всё равно 200.
+        from app.services.email_alert import EmailNotConfiguredError, EmailSendError, send_email
+
+        link = f"{settings.frontend_base_url}/reset-password?token={token}"
+        try:
+            await send_email(
+                user.email,
+                "[PulseWatch] Сброс пароля",
+                (
+                    "<p>Ты запросил сброс пароля для PulseWatch.</p>"
+                    f'<p><a href="{link}">Открой эту ссылку</a> чтобы установить новый пароль. '
+                    "Ссылка действительна 1 час.</p>"
+                    "<p>Если ты не запрашивал сброс — просто игнорируй это письмо.</p>"
+                ),
+                f"Сброс пароля: {link} (1 час)",
+            )
+        except (EmailNotConfiguredError, EmailSendError) as exc:
+            from loguru import logger
+
+            logger.warning("forgot-password email send skipped: {}", exc)
+    return {"status": "ok"}
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Обменивает токен на новый пароль. Заодно отзывает все refresh-сессии юзера —
+    если токен скомпрометирован, не оставляем атакующему путь через старые refresh.
+    """
+    if len(data.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Пароль должен быть не короче 6 символов",
+        )
+
+    user_id = await consume_password_reset_token(data.token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Токен сброса невалиден или истёк",
+        )
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        # Юзер удалён между генерацией токена и сбросом — на всякий случай 400
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Юзер не найден")
+
+    user.password_hash = hash_password(data.new_password)
+    await db.commit()
+
+    # Отзываем все refresh-токены — пользователь должен заново залогиниться везде
+    await revoke_all_refresh_for_user(user_id)
+    return {"status": "ok"}
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
