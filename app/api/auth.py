@@ -1,6 +1,7 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import pyotp
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError
 from sqlalchemy import select
@@ -34,6 +35,9 @@ from app.schemas.user import (
     EmailAlertsToggle,
     TelegramLink,
     TelegramLinkCode,
+    TotpDisableRequest,
+    TotpSetupResponse,
+    TotpVerifyRequest,
     UserCreate,
     UserRead,
 )
@@ -83,6 +87,7 @@ async def register_user(request: Request, data: UserCreate, db: AsyncSession = D
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
+    totp_code: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     # ШАГ 1: достать юзера
@@ -96,6 +101,19 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
+
+    # ШАГ 2.5: если у юзера включен TOTP — требуем второй фактор
+    if user.totp_enabled and user.totp_secret:
+        if not totp_code:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="TOTP_REQUIRED",
+            )
+        if not pyotp.TOTP(user.totp_secret).verify(totp_code, valid_window=1):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid TOTP code",
+            )
 
     # ШАГ 3: создать пару (access + refresh), refresh — в whitelist Redis
     access = create_access_token(subject=user.id)
@@ -293,6 +311,64 @@ async def toggle_email_alerts(
 ):
     """Включает/выключает email-уведомления об алертах для текущего юзера."""
     current_user.email_alerts_enabled = data.enabled
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+# ─── TOTP setup / enable / disable ──────────────────────────────────────────
+
+
+@router.post("/me/totp/setup", response_model=TotpSetupResponse)
+async def setup_totp(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Генерирует новый TOTP secret и сохраняет его (но totp_enabled остаётся False
+    пока юзер не подтвердит код через /me/totp/enable). Можно вызывать повторно —
+    каждый раз новый secret, старый теряется.
+    """
+    secret = pyotp.random_base32()
+    current_user.totp_secret = secret
+    current_user.totp_enabled = False
+    await db.commit()
+    otpauth_url = pyotp.TOTP(secret).provisioning_uri(
+        name=current_user.email,
+        issuer_name="PulseWatch",
+    )
+    return TotpSetupResponse(secret=secret, otpauth_url=otpauth_url)
+
+
+@router.post("/me/totp/enable", response_model=UserRead)
+async def enable_totp(
+    data: TotpVerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Подтверждает TOTP-код против secret, выставляет totp_enabled=True."""
+    if not current_user.totp_secret:
+        raise HTTPException(status_code=400, detail="TOTP не инициализирован, начни с /setup")
+    if not pyotp.TOTP(current_user.totp_secret).verify(data.code, valid_window=1):
+        raise HTTPException(status_code=400, detail="Неверный TOTP-код")
+    current_user.totp_enabled = True
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/me/totp/disable", response_model=UserRead)
+async def disable_totp(
+    data: TotpDisableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отключает TOTP. Требует подтверждение паролем — чтобы украденный access-токен
+    нельзя было использовать для отключения 2FA.
+    """
+    if not verify_password(data.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный пароль")
+    current_user.totp_secret = None
+    current_user.totp_enabled = False
     await db.commit()
     await db.refresh(current_user)
     return current_user

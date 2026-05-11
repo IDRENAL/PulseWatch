@@ -18,3 +18,9 @@ class User(Base):
     email_alerts_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # TOTP — pyotp хранит secret base32; в БД лежит «голым» (как у большинства реализаций).
+    # Для прода хочется шифровать через KMS, но для учебного хватит.
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
