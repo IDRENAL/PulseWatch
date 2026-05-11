@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseWatch</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>PulseWatch</h1>
+        <div id="user-bar" hidden>
+            <span id="user-email"></span>
+            <button id="logout-btn">Logout</button>
+        </div>
+    </header>
+    <main id="app">
+        <!-- Login view -->
+        <section id="login-view">
+            <h2>Вход</h2>
+            <form id="login-form">
+                <label>
+                    Email
+                    <input type="email" id="login-email" required autocomplete="email">
+                </label>
+                <label>
+                    Пароль
+                    <input type="password" id="login-password" required autocomplete="current-password">
+                </label>
+                <button type="submit">Войти</button>
+            </form>
+            <p id="login-error" class="error" hidden></p>
+        </section>
+
+        <!-- Dashboard view -->
+        <section id="dashboard-view" hidden>
+            <h2>Серверы</h2>
+            <div id="servers-list"></div>
+
+            <!-- Detail panel — появляется при клике на карточку -->
+            <section id="detail-panel" hidden>
+                <h2 id="detail-title">—</h2>
+                <div class="chart-wrap">
+                    <canvas id="metrics-chart"></canvas>
+                </div>
+            </section>
+        </section>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
