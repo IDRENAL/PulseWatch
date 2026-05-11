@@ -233,8 +233,8 @@ async def _send_heartbeat(server_id: int, recovered: bool) -> None:
         emoji, status_text = ("✅", "снова в строю") if recovered else ("⚠️", "не отвечает")
         last_seen = server.last_seen_at.isoformat() if server.last_seen_at else "ни разу"
 
-        # Telegram — если привязан chat_id
-        if user.telegram_chat_id:
+        # Telegram — если привязан chat_id и сервер не в mute'е
+        if user.telegram_chat_id and not await is_channel_muted(server.id, "telegram"):
             tg_text = (
                 f"{emoji} <b>Сервер {html.escape(server.name)} {status_text}</b>\n"
                 f"id: <code>{server.id}</code>\n"
@@ -245,8 +245,8 @@ async def _send_heartbeat(server_id: int, recovered: bool) -> None:
             except (TelegramNotConfiguredError, TelegramSendError) as exc:
                 logger.info("heartbeat tg send skipped: {}", exc)
 
-        # Email — если включены email-уведомления
-        if user.email_alerts_enabled:
+        # Email — если включены email-уведомления и не в mute'е
+        if user.email_alerts_enabled and not await is_channel_muted(server.id, "email"):
             subject = f"[PulseWatch] {server.name} {status_text}"
             html_body = (
                 f"<p>{emoji} <b>{html.escape(server.name)}</b> {status_text}.</p>"
