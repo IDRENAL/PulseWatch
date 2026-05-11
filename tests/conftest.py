@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -20,6 +21,7 @@ from app.models.metric import Metric  # noqa: F401
 from app.models.metric_aggregate import MetricAggregate  # noqa: F401
 from app.models.server import Server  # noqa: F401
 from app.models.user import User  # noqa: F401  -- регистрирует таблицу в Base.metadata
+from app.redis_client import set_redis_client
 
 # Rate limiter отключён глобально для тестов, иначе 4-я регистрация в одном
 # тесте или 6-й логин ловят 429 и валят сценарий. Тесты на сам лимитер
@@ -45,6 +47,31 @@ async def _ensure_test_db_exists() -> None:
             await conn.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
     finally:
         await conn.close()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def test_redis_session():
+    """Сессионный Redis-клиент. ASGITransport не запускает lifespan FastAPI,
+    поэтому глобальный клиент приложения не инициализируется автоматически.
+    """
+    client = Redis.from_url(settings.redis_url, decode_responses=True)
+    await client.ping()  # type: ignore[misc]
+    yield client
+    await client.aclose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _bind_redis_per_test(test_redis_session):
+    """Тесты Celery-задач (notification_tasks) в своём `finally` зовут
+    set_redis_client(None) — это обнуляет глобал между тестами и валит
+    последующие, которые ждут реальный Redis. Перевыставляем перед каждым.
+
+    Заодно чистим Redis — dashboard-кэш и whitelist refresh-токенов протекают
+    между тестами и валят те, что зависят от чистого DB-состояния.
+    """
+    await test_redis_session.flushdb()
+    set_redis_client(test_redis_session)
+    yield
 
 
 @pytest_asyncio.fixture(scope="session")

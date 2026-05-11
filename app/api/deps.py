@@ -27,6 +27,10 @@ async def get_current_user(
     try:
         # 1. Декодируем токен
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        # Refresh-токены не должны проходить как access — у них type=refresh.
+        # Старые токены без поля type считаем access (бэквард-совместимость).
+        if payload.get("type") == "refresh":
+            raise creds_exc
         user_id: str | None = payload.get("sub")
         if user_id is None:
             raise creds_exc
@@ -82,6 +86,8 @@ async def authenticate_ws_user(token: str | None, db: AsyncSession) -> User | No
         return None
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("type") == "refresh":
+            return None
         user_id = payload.get("sub")
         if user_id is None:
             return None

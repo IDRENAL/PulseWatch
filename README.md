@@ -95,7 +95,8 @@ curl -X POST http://localhost:8000/servers/register \
 | `REDIS_HOST`, `REDIS_PORT` | Redis-подключение |
 | `SECRET_KEY` | Ключ для подписи JWT. Не дефолтный, не пустой |
 | `ALGORITHM` | Алгоритм JWT (по умолчанию `HS256`) |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | TTL access-токена |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | TTL access-токена (по умолчанию 30 мин) |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | TTL refresh-токена (по умолчанию 7 дней) |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от `@BotFather`. Опционально — если пусто, уведомления отключены |
 | `TELEGRAM_BOT_USERNAME` | Username бота (без `@`). Нужен только для deep-link в `/auth/me/telegram/code` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_USE_TLS` | SMTP для email-уведомлений. Пусто → канал выключен |
@@ -110,7 +111,9 @@ curl -X POST http://localhost:8000/servers/register \
 
 ### Auth
 - `POST /auth/register` — регистрация юзера. Лимит **3/min на IP**.
-- `POST /auth/login` — логин (form-encoded). Лимит **5/min на IP**.
+- `POST /auth/login` — логин (form-encoded). Возвращает пару `{access_token, refresh_token, token_type}`. Лимит **5/min на IP**.
+- `POST /auth/refresh` — обменивает refresh на новую пару с **ротацией**: старый refresh инвалидируется. Тело JSON: `{"refresh_token": "..."}`. Лимит **5/min на IP**.
+- `POST /auth/logout` — отзывает refresh-токен (идемпотентно, всегда 204). Тело JSON: `{"refresh_token": "..."}`.
 - `GET /auth/me` — текущий юзер.
 - `POST /auth/me/telegram/code` — генерит одноразовый код привязки + deep-link `https://t.me/<bot>?start=<code>` (TTL 10 мин). Юзер шлёт `/start <code>` боту → бот ставит chat_id.
 - `PATCH /auth/me/telegram` — ручная привязка/отвязка chat_id (для скриптов). Тело: `{"chat_id": "12345"}` или `{"chat_id": null}`.
@@ -337,7 +340,7 @@ docs/         # планы этапов
 ## Известные ограничения / TODO
 
 - Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
-- Refresh-токены не реализованы — access-token живёт `ACCESS_TOKEN_EXPIRE_MINUTES`, после истечения юзер логинится заново.
+- Reuse-detection для refresh-токенов не реализован — при ротации старый jti инвалидируется, но мы не отзываем **все** сессии юзера при попытке использовать «украденный» (повторно использованный) токен. Если параноидально — добавить отдельный «used» ключ с TTL.
 - Alertmanager не подключён — Prometheus-метрики только наблюдаемы, на их основе алертов нет (наши алерты живут отдельно в Postgres + Celery).
 
 ## Лицензия

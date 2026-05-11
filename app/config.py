@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
     telegram_bot_token: str | None = None
     telegram_api_url: str = "https://api.telegram.org"
     telegram_bot_username: str | None = (
