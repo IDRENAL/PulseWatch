@@ -535,6 +535,7 @@ async def test_threshold_enqueues_notifications_on_trigger():
         threshold_value=90.0,
         last_triggered_at=None,
         cooldown_seconds=300,
+        notification_channels=["telegram", "email"],
     )
     rule.name = "cpu high"
     scalars = MagicMock()
