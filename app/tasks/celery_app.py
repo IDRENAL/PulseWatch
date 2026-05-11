@@ -37,6 +37,10 @@ celery_app.conf.update(
             "task": "app.tasks.resolve_tasks.task_resolve_alerts",
             "schedule": 60.0,  # каждую минуту
         },
+        "prune-old-logs": {
+            "task": "app.tasks.log_retention.task_prune_old_logs",
+            "schedule": 86400.0,  # раз в сутки
+        },
     },
 )
 

@@ -14,6 +14,7 @@ from app.core.security import hash_password
 from app.database import get_db
 from app.models.docker_aggregate import DockerAggregate
 from app.models.docker_metric import DockerMetric
+from app.models.log_entry import LogEntry
 from app.models.metric import Metric
 from app.models.metric_aggregate import MetricAggregate
 from app.models.metric_aggregate import PeriodType as AggregatePeriodType
@@ -548,3 +549,44 @@ async def export_docker_metrics(
 
     filename = f"server-{server_id}-docker-{granularity}-{start.date()}-{end.date()}.csv"
     return stream_csv(filename=filename, header=header, rows=rows)
+
+
+@router.get("/{server_id}/logs/export")
+async def export_logs(
+    server_id: int,
+    start: datetime | None = Query(default=None, description="нижняя граница created_at (ISO)"),
+    end: datetime | None = Query(default=None, description="верхняя граница created_at (ISO)"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV-экспорт строк журнала сервера. Default — последние 24ч. Max окно — 7 дней."""
+    await _verify_server_ownership(db, server_id, current_user.id)
+    if end is None:
+        end = datetime.now(UTC)
+    if start is None:
+        start = end - timedelta(hours=24)
+    if (end - start) > timedelta(days=7):
+        raise HTTPException(status_code=400, detail="Период не должен превышать 7 дней")
+
+    query = (
+        select(LogEntry)
+        .where(
+            LogEntry.server_id == server_id,
+            LogEntry.created_at >= start,
+            LogEntry.created_at <= end,
+        )
+        .order_by(LogEntry.created_at.asc())
+    )
+
+    async def rows_iter() -> AsyncIterator[dict]:
+        # Стримим пачками по 500 чтобы не загружать всё в память при больших окнах
+        result = await db.stream(query)
+        async for entry in result.scalars():
+            yield {
+                "id": entry.id,
+                "created_at": entry.created_at.isoformat(),
+                "message": entry.message,
+            }
+
+    filename = f"server-{server_id}-logs-{start.date()}-{end.date()}.csv"
+    return stream_csv(filename=filename, header=["id", "created_at", "message"], rows=rows_iter())
