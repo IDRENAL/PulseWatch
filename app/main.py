@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 from redis.asyncio import Redis
 from slowapi import _rate_limit_exceeded_handler
@@ -62,3 +64,11 @@ async def health():
     except Exception:
         redis_ok = False
     return {"status": "ok", "redis": redis_ok}
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return FileResponse("static/index.html")
