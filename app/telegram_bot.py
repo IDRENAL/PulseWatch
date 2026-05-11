@@ -17,18 +17,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import async_session_factory
 from app.models.alert_event import AlertEvent
-from app.models.alert_rule import AlertRule
+from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
 from app.models.metric import Metric
 from app.models.server import Server
 from app.models.user import User
 from app.redis_client import (
     MUTE_CHANNELS,
+    clear_rule_draft,
     consume_pending_delete,
     consume_tg_link_code,
     get_channel_mute_ttl,
+    get_rule_draft,
     set_channel_mute,
     set_pending_delete,
     set_redis_client,
+    set_rule_draft,
 )
 
 _POLL_TIMEOUT_SECONDS = 30
@@ -43,6 +46,17 @@ _EVENTS_PATTERN = re.compile(r"^/events(?:\s+(?P<server_id>\d+))?\s*$")
 _EVENTS_LIMIT = 10
 _PAUSE_PATTERN = re.compile(r"^/pause\s+(?P<server_id>\d+)\s*$")
 _RESUME_PATTERN = re.compile(r"^/resume\s+(?P<server_id>\d+)\s*$")
+
+# /createrule — диалоговое создание правила. Только system-метрики (cpu/mem/disk).
+# Docker-правила (с container_name) — через REST, чтобы не плодить шаги диалога.
+_METRIC_FIELDS = ("cpu_percent", "memory_percent", "disk_percent")
+_OPERATORS = ("gt", "gte", "lt", "lte", "eq", "neq")
+_CHANNEL_PRESETS = {
+    "telegram": ["telegram"],
+    "email": ["email"],
+    "both": ["telegram", "email"],
+    "none": [],
+}
 
 
 def _bot_url(method: str) -> str:
@@ -108,7 +122,7 @@ async def _handle_start(client: httpx.AsyncClient, chat_id: int, text: str) -> N
             "Команды:\n"
             "  /status, /servers\n"
             "  /mute <server_id> <minutes> [telegram|email|all]\n"
-            "  /rules, /toggle <rule_id>\n"
+            "  /rules, /toggle <rule_id>, /createrule\n"
             "  /delete <server_id>\n"
             "  /events [server_id]\n"
             "  /pause <server_id>, /resume <server_id>",
@@ -450,6 +464,174 @@ async def _handle_resume(client: httpx.AsyncClient, chat_id: int, user: User, te
     )
 
 
+# ─── /createrule — диалоговое создание правила (state-машина в Redis) ──────
+
+
+async def _handle_createrule_start(client: httpx.AsyncClient, chat_id: int, user: User) -> None:
+    """Старт диалога. Текущий черновик (если был) сбрасываем."""
+    async with async_session_factory() as db:
+        servers = (
+            (await db.execute(select(Server).where(Server.owner_id == user.id))).scalars().all()
+        )
+    if not servers:
+        await _send(
+            client, chat_id, "❌ У тебя нет серверов. Зарегистрируй через POST /servers/register."
+        )
+        return
+
+    await set_rule_draft(chat_id, {"step": "server", "data": {}})
+    lines = ["📝 Создание правила (system-метрики).\nНа каком сервере? Твои:"]
+    for s in servers:
+        lines.append(f"  #{s.id} {s.name}")
+    lines.append("Введи id сервера. Любой момент можно прервать через /cancel.")
+    await _send(client, chat_id, "\n".join(lines))
+
+
+async def _handle_cancel(client: httpx.AsyncClient, chat_id: int) -> None:
+    await clear_rule_draft(chat_id)
+    await _send(client, chat_id, "Черновик отменён.")
+
+
+async def _process_rule_draft(
+    client: httpx.AsyncClient, chat_id: int, user: User, text: str, draft: dict
+) -> None:
+    """Обработка одного шага диалога. На каждом шаге парсим вход, валидируем,
+    если ок — двигаемся к следующему шагу, если нет — повторяем вопрос с подсказкой.
+    """
+    step = draft["step"]
+    data = draft["data"]
+    text = text.strip()
+
+    if step == "server":
+        if not text.isdigit():
+            await _send(client, chat_id, "❌ Нужно число — id сервера.")
+            return
+        server_id = int(text)
+        async with async_session_factory() as db:
+            server = (
+                await db.execute(
+                    select(Server).where(Server.id == server_id, Server.owner_id == user.id)
+                )
+            ).scalar_one_or_none()
+        if server is None:
+            await _send(client, chat_id, "❌ Сервер не найден или не твой. Введи id ещё раз.")
+            return
+        data["server_id"] = server_id
+        data["server_name"] = server.name
+        draft["step"] = "name"
+        await set_rule_draft(chat_id, draft)
+        await _send(client, chat_id, "Как назвать правило? (свободный текст)")
+        return
+
+    if step == "name":
+        if not text or len(text) > 255:
+            await _send(client, chat_id, "❌ Имя должно быть от 1 до 255 символов.")
+            return
+        data["name"] = text
+        draft["step"] = "metric"
+        await set_rule_draft(chat_id, draft)
+        await _send(
+            client,
+            chat_id,
+            f"Какая метрика? Доступно: {', '.join(_METRIC_FIELDS)}",
+        )
+        return
+
+    if step == "metric":
+        metric = text.lower()
+        if metric not in _METRIC_FIELDS:
+            await _send(client, chat_id, f"❌ Допустимо: {', '.join(_METRIC_FIELDS)}")
+            return
+        data["metric_field"] = metric
+        draft["step"] = "operator"
+        await set_rule_draft(chat_id, draft)
+        await _send(client, chat_id, f"Оператор? {', '.join(_OPERATORS)}")
+        return
+
+    if step == "operator":
+        op = text.lower()
+        if op not in _OPERATORS:
+            await _send(client, chat_id, f"❌ Допустимо: {', '.join(_OPERATORS)}")
+            return
+        data["operator"] = op
+        draft["step"] = "threshold"
+        await set_rule_draft(chat_id, draft)
+        await _send(client, chat_id, "Порог? (число, например 80 или 0.75)")
+        return
+
+    if step == "threshold":
+        try:
+            value = float(text)
+        except ValueError:
+            await _send(client, chat_id, "❌ Не понимаю, нужно число.")
+            return
+        data["threshold_value"] = value
+        draft["step"] = "channels"
+        await set_rule_draft(chat_id, draft)
+        await _send(
+            client,
+            chat_id,
+            "Куда слать уведомления? telegram / email / both / none",
+        )
+        return
+
+    if step == "channels":
+        preset = text.lower()
+        if preset not in _CHANNEL_PRESETS:
+            await _send(client, chat_id, "❌ Допустимо: telegram, email, both, none")
+            return
+        data["notification_channels"] = _CHANNEL_PRESETS[preset]
+        draft["step"] = "confirm"
+        await set_rule_draft(chat_id, draft)
+        channels_str = ", ".join(data["notification_channels"]) or "—"
+        summary = (
+            "Проверь:\n"
+            f"  сервер: #{data['server_id']} {data['server_name']}\n"
+            f"  имя: {data['name']}\n"
+            f"  условие: {data['metric_field']} {data['operator']} {data['threshold_value']}\n"
+            f"  каналы: {channels_str}\n"
+            "Создать? y / n"
+        )
+        await _send(client, chat_id, summary)
+        return
+
+    if step == "confirm":
+        if text.lower() in ("n", "no", "нет"):
+            await clear_rule_draft(chat_id)
+            await _send(client, chat_id, "Отменено, ничего не создал.")
+            return
+        if text.lower() not in ("y", "yes", "да"):
+            await _send(client, chat_id, "Ответь y или n.")
+            return
+
+        # Создаём правило
+        async with async_session_factory() as db:
+            rule = AlertRule(
+                server_id=data["server_id"],
+                owner_id=user.id,
+                name=data["name"],
+                metric_type=MetricType.system,
+                metric_field=data["metric_field"],
+                operator=ThresholdOperator(data["operator"]),
+                threshold_value=data["threshold_value"],
+                notification_channels=data["notification_channels"],
+            )
+            db.add(rule)
+            await db.commit()
+            await db.refresh(rule)
+
+        await clear_rule_draft(chat_id)
+        await _send(client, chat_id, f"✅ Правило #{rule.id} «{rule.name}» создано.")
+        return
+
+    # Неизвестный шаг — лечим сбросом
+    logger.warning("rule_draft: unknown step {} for chat_id={}", step, chat_id)
+    await clear_rule_draft(chat_id)
+    await _send(
+        client, chat_id, "Что-то пошло не так, черновик сброшен. /createrule чтобы начать заново."
+    )
+
+
 # ─── Главный диспетчер ──────────────────────────────────────────────────────
 
 
@@ -465,20 +647,36 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
         await _handle_start(client, chat_id, text)
         return
 
-    # Все остальные команды требуют привязанного юзера
-    if not text.startswith("/"):
-        return  # игнорируем обычный текст
-
+    # Все остальные команды (и draft-ответы) требуют привязанного юзера
     async with async_session_factory() as db:
         user = await _find_user_by_chat_id(db, chat_id)
     if user is None:
-        await _send(
-            client,
-            chat_id,
-            "Этот чат не привязан к аккаунту. Получи код через "
-            "POST /auth/me/telegram/code и отправь /start <код>.",
-        )
+        if text.startswith("/"):
+            await _send(
+                client,
+                chat_id,
+                "Этот чат не привязан к аккаунту. Получи код через "
+                "POST /auth/me/telegram/code и отправь /start <код>.",
+            )
         return
+
+    # /cancel сбрасывает активный черновик (если есть) и выходит
+    if text.startswith("/cancel"):
+        await _handle_cancel(client, chat_id)
+        return
+
+    # Активный черновик правила перехватывает не-слеш-сообщения
+    draft = await get_rule_draft(chat_id)
+    if draft is not None and not text.startswith("/"):
+        await _process_rule_draft(client, chat_id, user, text, draft)
+        return
+
+    # Слеш-команда при активном черновике — отменяем диалог (явный exit от юзера)
+    if draft is not None and text.startswith("/"):
+        await clear_rule_draft(chat_id)
+
+    if not text.startswith("/"):
+        return  # обычный текст без активного черновика — игнор
 
     if text.startswith("/status"):
         await _handle_status(client, chat_id, user)
@@ -498,6 +696,8 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
         await _handle_pause(client, chat_id, user, text)
     elif text.startswith("/resume"):
         await _handle_resume(client, chat_id, user, text)
+    elif text.startswith("/createrule"):
+        await _handle_createrule_start(client, chat_id, user)
     else:
         await _send(
             client,
@@ -505,10 +705,11 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
             "Неизвестная команда. Доступные:\n"
             "  /status, /servers\n"
             "  /mute <server_id> <minutes> [telegram|email|all]\n"
-            "  /rules, /toggle <rule_id>\n"
+            "  /rules, /toggle <rule_id>, /createrule\n"
             "  /delete <server_id>\n"
             "  /events [server_id]\n"
-            "  /pause <server_id>, /resume <server_id>",
+            "  /pause <server_id>, /resume <server_id>\n"
+            "  /cancel — прервать диалог /createrule",
         )
 
 
