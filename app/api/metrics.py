@@ -19,6 +19,11 @@ async def submit_metric(
     server: Server = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
+    # Paused-сервер тихо игнорирует метрики — агент не получает ошибку, но мы
+    # ничего не сохраняем и не апдейтим last_seen (heartbeat не оживит).
+    if server.paused:
+        return {"status": "paused"}
+
     new_metric = Metric(
         server_id=server.id,
         cpu_percent=data.cpu_percent,

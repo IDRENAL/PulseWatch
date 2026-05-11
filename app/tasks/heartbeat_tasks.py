@@ -28,10 +28,15 @@ async def _run_heartbeat_check() -> None:
     threshold = datetime.now(UTC) - timedelta(minutes=5)
 
     async with async_session_factory() as db:
+        # Paused-серверы heartbeat игнорирует — их статус управляется юзером вручную.
         # Помечаем неактивные серверы
         result = await db.execute(
             update(Server)
-            .where(Server.last_seen_at < threshold, Server.is_active == True)
+            .where(
+                Server.last_seen_at < threshold,
+                Server.is_active == True,
+                Server.paused == False,
+            )
             .values(is_active=False)
             .returning(Server.id, Server.name)
         )
@@ -40,7 +45,11 @@ async def _run_heartbeat_check() -> None:
         # Помечаем активные серверы (если снова появились)
         result = await db.execute(
             update(Server)
-            .where(Server.last_seen_at >= threshold, Server.is_active == False)
+            .where(
+                Server.last_seen_at >= threshold,
+                Server.is_active == False,
+                Server.paused == False,
+            )
             .values(is_active=True)
             .returning(Server.id, Server.name)
         )

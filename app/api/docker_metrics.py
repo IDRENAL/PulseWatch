@@ -19,6 +19,10 @@ async def submit_docker_metrics(
     server: Server = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
+    # Paused-сервер тихо игнорирует docker-метрики
+    if server.paused:
+        return {"status": "paused", "count": 0}
+
     rows = [DockerMetric(server_id=server.id, **item.model_dump()) for item in data]
     db.add_all(rows)
 

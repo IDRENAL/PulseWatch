@@ -384,7 +384,7 @@ async def test_bot_status_authenticated_user(monkeypatch):
 
     user = MagicMock(id=1)
 
-    server = MagicMock(id=42)
+    server = MagicMock(id=42, paused=False)
     server.name = "prod-1"
     metric = MagicMock(cpu_percent=15.5, memory_percent=40.2, disk_percent=30.0)
 
