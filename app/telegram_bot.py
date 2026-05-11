@@ -47,9 +47,12 @@ _EVENTS_LIMIT = 10
 _PAUSE_PATTERN = re.compile(r"^/pause\s+(?P<server_id>\d+)\s*$")
 _RESUME_PATTERN = re.compile(r"^/resume\s+(?P<server_id>\d+)\s*$")
 
-# /createrule — диалоговое создание правила. Только system-метрики (cpu/mem/disk).
-# Docker-правила (с container_name) — через REST, чтобы не плодить шаги диалога.
-_METRIC_FIELDS = ("cpu_percent", "memory_percent", "disk_percent")
+# /createrule — диалоговое создание правила.
+# system → cpu_percent / memory_percent / disk_percent.
+# docker → cpu_percent / memory_usage_mb / memory_limit_mb + опциональный container_name.
+_METRIC_TYPES = ("system", "docker")
+_SYSTEM_METRIC_FIELDS = ("cpu_percent", "memory_percent", "disk_percent")
+_DOCKER_METRIC_FIELDS = ("cpu_percent", "memory_usage_mb", "memory_limit_mb")
 _OPERATORS = ("gt", "gte", "lt", "lte", "eq", "neq")
 _CHANNEL_PRESETS = {
     "telegram": ["telegram"],
@@ -480,7 +483,7 @@ async def _handle_createrule_start(client: httpx.AsyncClient, chat_id: int, user
         return
 
     await set_rule_draft(chat_id, {"step": "server", "data": {}})
-    lines = ["📝 Создание правила (system-метрики).\nНа каком сервере? Твои:"]
+    lines = ["📝 Создание правила.\nНа каком сервере? Твои:"]
     for s in servers:
         lines.append(f"  #{s.id} {s.name}")
     lines.append("Введи id сервера. Любой момент можно прервать через /cancel.")
@@ -518,6 +521,21 @@ async def _process_rule_draft(
             return
         data["server_id"] = server_id
         data["server_name"] = server.name
+        draft["step"] = "metric_type"
+        await set_rule_draft(chat_id, draft)
+        await _send(
+            client,
+            chat_id,
+            f"Тип метрики? {' / '.join(_METRIC_TYPES)}",
+        )
+        return
+
+    if step == "metric_type":
+        mt = text.lower()
+        if mt not in _METRIC_TYPES:
+            await _send(client, chat_id, f"❌ Допустимо: {', '.join(_METRIC_TYPES)}")
+            return
+        data["metric_type"] = mt
         draft["step"] = "name"
         await set_rule_draft(chat_id, draft)
         await _send(client, chat_id, "Как назвать правило? (свободный текст)")
@@ -530,19 +548,36 @@ async def _process_rule_draft(
         data["name"] = text
         draft["step"] = "metric"
         await set_rule_draft(chat_id, draft)
-        await _send(
-            client,
-            chat_id,
-            f"Какая метрика? Доступно: {', '.join(_METRIC_FIELDS)}",
-        )
+        fields = _SYSTEM_METRIC_FIELDS if data["metric_type"] == "system" else _DOCKER_METRIC_FIELDS
+        await _send(client, chat_id, f"Какая метрика? Доступно: {', '.join(fields)}")
         return
 
     if step == "metric":
         metric = text.lower()
-        if metric not in _METRIC_FIELDS:
-            await _send(client, chat_id, f"❌ Допустимо: {', '.join(_METRIC_FIELDS)}")
+        fields = _SYSTEM_METRIC_FIELDS if data["metric_type"] == "system" else _DOCKER_METRIC_FIELDS
+        if metric not in fields:
+            await _send(client, chat_id, f"❌ Допустимо: {', '.join(fields)}")
             return
         data["metric_field"] = metric
+        if data["metric_type"] == "docker":
+            draft["step"] = "container"
+            await set_rule_draft(chat_id, draft)
+            await _send(
+                client,
+                chat_id,
+                "Имя контейнера? Введи точное имя или `*` чтобы правило применялось к любому контейнеру.",
+            )
+            return
+        draft["step"] = "operator"
+        await set_rule_draft(chat_id, draft)
+        await _send(client, chat_id, f"Оператор? {', '.join(_OPERATORS)}")
+        return
+
+    if step == "container":
+        if not text:
+            await _send(client, chat_id, "❌ Имя контейнера или `*`.")
+            return
+        data["container_name"] = None if text == "*" else text[:255]
         draft["step"] = "operator"
         await set_rule_draft(chat_id, draft)
         await _send(client, chat_id, f"Оператор? {', '.join(_OPERATORS)}")
@@ -584,10 +619,14 @@ async def _process_rule_draft(
         draft["step"] = "confirm"
         await set_rule_draft(chat_id, draft)
         channels_str = ", ".join(data["notification_channels"]) or "—"
+        container_part = ""
+        if data["metric_type"] == "docker":
+            container_part = f"\n  контейнер: {data.get('container_name') or 'любой'}"
         summary = (
             "Проверь:\n"
             f"  сервер: #{data['server_id']} {data['server_name']}\n"
             f"  имя: {data['name']}\n"
+            f"  тип: {data['metric_type']}{container_part}\n"
             f"  условие: {data['metric_field']} {data['operator']} {data['threshold_value']}\n"
             f"  каналы: {channels_str}\n"
             "Создать? y / n"
@@ -610,10 +649,11 @@ async def _process_rule_draft(
                 server_id=data["server_id"],
                 owner_id=user.id,
                 name=data["name"],
-                metric_type=MetricType.system,
+                metric_type=MetricType(data["metric_type"]),
                 metric_field=data["metric_field"],
                 operator=ThresholdOperator(data["operator"]),
                 threshold_value=data["threshold_value"],
+                container_name=data.get("container_name"),
                 notification_channels=data["notification_channels"],
             )
             db.add(rule)
