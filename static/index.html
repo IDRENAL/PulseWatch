@@ -56,6 +56,56 @@
         <!-- Rules tab -->
         <section class="tab-view" id="view-rules" hidden>
             <h2>Алерт-правила</h2>
+            <button id="rules-new-toggle" class="btn-small">Создать правило</button>
+            <form id="rules-new-form" class="rule-form" hidden>
+                <label>Сервер
+                    <select id="rule-server" required></select>
+                </label>
+                <label>Имя
+                    <input type="text" id="rule-name" maxlength="255" required>
+                </label>
+                <label>Тип метрики
+                    <select id="rule-metric-type">
+                        <option value="system">system</option>
+                        <option value="docker">docker</option>
+                    </select>
+                </label>
+                <label id="rule-container-wrap" hidden>Имя контейнера (пусто = любой)
+                    <input type="text" id="rule-container" maxlength="255">
+                </label>
+                <label>Метрика
+                    <select id="rule-metric-field"></select>
+                </label>
+                <label>Оператор
+                    <select id="rule-operator">
+                        <option value="gt">gt</option>
+                        <option value="gte">gte</option>
+                        <option value="lt">lt</option>
+                        <option value="lte">lte</option>
+                        <option value="eq">eq</option>
+                        <option value="neq">neq</option>
+                    </select>
+                </label>
+                <label>Порог
+                    <input type="number" id="rule-threshold" step="any" required>
+                </label>
+                <label>Cooldown (сек)
+                    <input type="number" id="rule-cooldown" min="0" value="300">
+                </label>
+                <label class="rule-channels">Каналы:
+                    <span>
+                        <input type="checkbox" id="rule-channel-telegram" checked> telegram
+                    </span>
+                    <span>
+                        <input type="checkbox" id="rule-channel-email" checked> email
+                    </span>
+                </label>
+                <div>
+                    <button type="submit">Создать</button>
+                    <button type="button" id="rules-new-cancel" class="btn-secondary">Отмена</button>
+                </div>
+                <p id="rules-new-error" class="error" hidden></p>
+            </form>
             <div id="rules-table-wrap"></div>
         </section>
 

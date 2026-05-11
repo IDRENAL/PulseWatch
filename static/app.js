@@ -115,6 +115,14 @@ async function fetchRules() {
     return response.ok ? response.json() : [];
 }
 
+async function createRule(payload) {
+    return apiFetch("/alerts/rules", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+    });
+}
+
 async function patchRule(ruleId, fields) {
     return apiFetch(`/alerts/rules/${ruleId}`, {
         method: "PATCH",
@@ -353,7 +361,74 @@ function appendMetricPoint(metric) {
 
 // ─── Rules tab ──────────────────────────────────────────────────────────────
 
+const SYSTEM_FIELDS = ["cpu_percent", "memory_percent", "disk_percent"];
+const DOCKER_FIELDS = ["cpu_percent", "memory_usage_mb", "memory_limit_mb"];
+
+function initRuleFormSelectors() {
+    const serverSel = document.getElementById("rule-server");
+    serverSel.innerHTML = "";
+    for (const s of serversCache) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = `#${s.id} ${s.name}`;
+        serverSel.appendChild(opt);
+    }
+    updateRuleMetricFields();
+}
+
+function updateRuleMetricFields() {
+    const type = document.getElementById("rule-metric-type").value;
+    const fields = type === "docker" ? DOCKER_FIELDS : SYSTEM_FIELDS;
+    document.getElementById("rule-container-wrap").hidden = type !== "docker";
+    const sel = document.getElementById("rule-metric-field");
+    sel.innerHTML = "";
+    for (const f of fields) {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f;
+        sel.appendChild(opt);
+    }
+}
+
+async function submitRuleForm(e) {
+    e.preventDefault();
+    const errorEl = document.getElementById("rules-new-error");
+    errorEl.hidden = true;
+
+    const channels = [];
+    if (document.getElementById("rule-channel-telegram").checked) channels.push("telegram");
+    if (document.getElementById("rule-channel-email").checked) channels.push("email");
+
+    const payload = {
+        server_id: Number(document.getElementById("rule-server").value),
+        name: document.getElementById("rule-name").value.trim(),
+        metric_type: document.getElementById("rule-metric-type").value,
+        metric_field: document.getElementById("rule-metric-field").value,
+        operator: document.getElementById("rule-operator").value,
+        threshold_value: Number(document.getElementById("rule-threshold").value),
+        cooldown_seconds: Number(document.getElementById("rule-cooldown").value),
+        notification_channels: channels,
+    };
+    if (payload.metric_type === "docker") {
+        const container = document.getElementById("rule-container").value.trim();
+        if (container) payload.container_name = container;
+    }
+
+    const response = await createRule(payload);
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        errorEl.textContent = `Ошибка ${response.status}: ${JSON.stringify(detail.detail || detail)}`;
+        errorEl.hidden = false;
+        return;
+    }
+    document.getElementById("rules-new-form").reset();
+    document.getElementById("rules-new-form").hidden = true;
+    document.getElementById("rules-new-toggle").hidden = false;
+    loadRulesTab();
+}
+
 async function loadRulesTab() {
+    initRuleFormSelectors();
     const wrap = document.getElementById("rules-table-wrap");
     wrap.innerHTML = '<p class="empty">Загрузка…</p>';
 
@@ -625,6 +700,19 @@ async function init() {
     document.querySelectorAll(".tab").forEach((btn) => {
         btn.addEventListener("click", () => setTab(btn.dataset.tab));
     });
+
+    // Rules tab handlers — форма создания
+    document.getElementById("rules-new-toggle").addEventListener("click", () => {
+        document.getElementById("rules-new-form").hidden = false;
+        document.getElementById("rules-new-toggle").hidden = true;
+        initRuleFormSelectors();
+    });
+    document.getElementById("rules-new-cancel").addEventListener("click", () => {
+        document.getElementById("rules-new-form").hidden = true;
+        document.getElementById("rules-new-toggle").hidden = false;
+    });
+    document.getElementById("rule-metric-type").addEventListener("change", updateRuleMetricFields);
+    document.getElementById("rules-new-form").addEventListener("submit", submitRuleForm);
 
     // Events tab handlers
     document.getElementById("events-refresh").addEventListener("click", renderEvents);
