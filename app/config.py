@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     telegram_bot_username: str | None = (
         None  # без @, нужен для deep-link https://t.me/<u>?start=<code>
     )
+    # Чат админа для Alertmanager-уведомлений (BackendDown, HighRequestLatency и т.п.).
+    # Если пусто — webhook просто логирует.
+    admin_telegram_chat_id: str | None = None
     # SMTP — все поля опциональные; если smtp_host пуст, email-уведомления выключены
     smtp_host: str | None = None
     smtp_port: int = 587
