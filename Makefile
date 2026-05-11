@@ -1,4 +1,4 @@
-.PHONY: help up down logs shell migrate test agent flower demo
+.PHONY: help up down logs shell migrate test test-e2e agent flower demo
 
 help:  ## показать все доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -18,8 +18,11 @@ shell:  ## bash в контейнере app
 migrate:  ## применить миграции (внутри контейнера app)
 	docker compose exec app alembic upgrade head
 
-test:  ## прогнать тесты локально
+test:  ## прогнать unit-тесты локально (нужны запущенные Postgres+Redis)
 	uv run pytest -v
+
+test-e2e:  ## прогнать E2E-тесты Playwright (нужен запущенный стек: make up + установленные браузеры)
+	uv run pytest e2e/ -v
 
 agent:  ## запустить агент локально (без systemd)
 	uv run python -m agent.agent
