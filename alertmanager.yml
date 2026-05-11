@@ -1,5 +1,9 @@
 global:
   resolve_timeout: 5m
+  # Slack webhook (Incoming Webhooks). Замени на свой URL.
+  # Если оставишь REPLACE_ME — Slack-receiver просто будет молча падать,
+  # на webhook-receiver к app это не влияет.
+  slack_api_url: 'https://hooks.slack.com/services/REPLACE_ME'
 
 route:
   receiver: pulsewatch-webhook
@@ -7,10 +11,28 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 3h
+  routes:
+    # critical-алерты идут И в webhook, И в Slack (continue: true пробрасывает дальше)
+    - matchers:
+        - severity = "critical"
+      receiver: slack-critical
+      continue: true
 
 receivers:
   - name: pulsewatch-webhook
     webhook_configs:
-      # Alertmanager и app в одной docker-сети — стучимся по имени сервиса.
       - url: http://app:8000/alertmanager/webhook
         send_resolved: true
+
+  - name: slack-critical
+    slack_configs:
+      - channel: '#alerts'
+        send_resolved: true
+        title: '{{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Status:* {{ .Status }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}

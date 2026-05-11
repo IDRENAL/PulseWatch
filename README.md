@@ -271,6 +271,15 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 
 Первый запрос на `/metrics/prometheus` идёт через 15с после старта Prometheus, так что сразу после `up` метрик может ещё не быть — подожди минуту.
 
+**Slack-канал для critical-алертов.** В `alertmanager.yml` есть второй receiver `slack-critical` с маршрутизацией по `severity = critical` (и `continue: true` чтобы дублировать в webhook). Чтобы включить:
+
+1. Получи Slack Incoming Webhook URL (`https://hooks.slack.com/services/...`).
+2. Замени значение `slack_api_url` в `alertmanager.yml`.
+3. При желании поменяй `channel: '#alerts'` на нужный.
+4. `docker compose restart alertmanager`.
+
+Если оставить плейсхолдер `REPLACE_ME` — Slack-доставка просто будет молча фейлиться, webhook к app продолжит работать.
+
 **Готовые Prometheus-алерты** (`prometheus_rules.yml`):
 
 | Алерт | Условие | for | Severity |
