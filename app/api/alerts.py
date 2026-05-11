@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +13,7 @@ from app.models.server import Server
 from app.models.user import User
 from app.schemas.alert_event import AlertEventRead
 from app.schemas.alert_rule import AlertRuleCreate, AlertRuleRead, AlertRuleUpdate
+from app.utils.csv_export import stream_csv
 
 router = APIRouter()
 
@@ -165,3 +169,80 @@ async def get_alert_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Alert event not found")
     return event
+
+
+# 8. GET /alerts/events/export — CSV-экспорт событий
+@router.get("/events/export")
+async def export_alert_events(
+    start: datetime | None = Query(default=None, description="нижняя граница created_at (ISO)"),
+    end: datetime | None = Query(default=None, description="верхняя граница created_at (ISO)"),
+    server_id: int | None = Query(default=None),
+    rule_id: int | None = Query(default=None),
+    only_open: bool = Query(
+        default=False, description="только нерезолвнутые (resolved_at is null)"
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV-экспорт событий. Период до 90 дней. Default — последние 7 дней."""
+    if end is None:
+        end = datetime.now(UTC)
+    if start is None:
+        start = end - timedelta(days=7)
+    if (end - start) > timedelta(days=90):
+        raise HTTPException(status_code=400, detail="Период не должен превышать 90 дней")
+
+    query = (
+        select(AlertEvent, AlertRule.name, Server.name)
+        .join(AlertRule, AlertEvent.rule_id == AlertRule.id)
+        .join(Server, AlertEvent.server_id == Server.id)
+        .where(
+            AlertRule.owner_id == current_user.id,
+            AlertEvent.created_at >= start,
+            AlertEvent.created_at <= end,
+        )
+        .order_by(AlertEvent.created_at.asc())
+    )
+    if server_id is not None:
+        query = query.where(AlertEvent.server_id == server_id)
+    if rule_id is not None:
+        query = query.where(AlertEvent.rule_id == rule_id)
+    if only_open:
+        query = query.where(AlertEvent.resolved_at.is_(None))
+
+    result = await db.execute(query)
+    rows = result.tuples().all()
+
+    async def rows_iter() -> AsyncIterator[dict]:
+        for event, rule_name, server_name in rows:
+            yield {
+                "id": event.id,
+                "server_id": event.server_id,
+                "server_name": server_name,
+                "rule_id": event.rule_id,
+                "rule_name": rule_name,
+                "container_name": event.container_name or "",
+                "metric_value": event.metric_value,
+                "threshold_value": event.threshold_value,
+                "status": "resolved" if event.resolved_at else "open",
+                "created_at": event.created_at.isoformat(),
+                "resolved_at": event.resolved_at.isoformat() if event.resolved_at else "",
+                "message": event.message,
+            }
+
+    filename = f"alert_events_{start.date()}_{end.date()}.csv"
+    header = [
+        "id",
+        "server_id",
+        "server_name",
+        "rule_id",
+        "rule_name",
+        "container_name",
+        "metric_value",
+        "threshold_value",
+        "status",
+        "created_at",
+        "resolved_at",
+        "message",
+    ]
+    return stream_csv(filename, header, rows_iter())
