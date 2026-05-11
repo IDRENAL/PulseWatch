@@ -60,8 +60,11 @@ Self-hosted система мониторинга серверов: агенты
 cp .env.example .env
 # отредактируй DB_PASSWORD, SECRET_KEY (для SECRET_KEY: python -c "import secrets; print(secrets.token_urlsafe(32))")
 
-# 2. Поднять стек (Postgres + Redis + backend + Celery worker + Celery beat + Telegram bot)
+# 2. Поднять стек (Postgres + Redis + backend + Celery worker + Celery beat + Telegram bot + Prometheus + Alertmanager + Grafana)
 make up
+
+# Альтернатива — `make demo` создаст юзера/сервер/правила и погонит фейковый агент
+# (см. секцию ниже про быстрый онбординг)
 
 # 3. Прогнать миграции
 make migrate
@@ -113,7 +116,7 @@ curl -X POST http://localhost:8000/servers/register \
 ### Auth
 - `POST /auth/register` — регистрация юзера. Лимит **3/min на IP**.
 - `POST /auth/login` — логин (form-encoded). Возвращает пару `{access_token, refresh_token, token_type}`. Лимит **5/min на IP**.
-- `POST /auth/refresh` — обменивает refresh на новую пару с **ротацией**: старый refresh инвалидируется. Тело JSON: `{"refresh_token": "..."}`. Лимит **5/min на IP**.
+- `POST /auth/refresh` — обменивает refresh на новую пару с **ротацией**: старый refresh инвалидируется и помечается как «used» в Redis (TTL=TTL_токена). Если предъявляют уже использованный jti — это **reuse detection**: отзываем все сессии юзера (SCAN `refresh:<id>:*` + DEL) и возвращаем 401. Тело JSON: `{"refresh_token": "..."}`. Лимит **5/min на IP**.
 - `POST /auth/logout` — отзывает refresh-токен (идемпотентно, всегда 204). Тело JSON: `{"refresh_token": "..."}`.
 - `GET /auth/me` — текущий юзер.
 - `POST /auth/me/telegram/code` — генерит одноразовый код привязки + deep-link `https://t.me/<bot>?start=<code>` (TTL 10 мин). Юзер шлёт `/start <code>` боту → бот ставит chat_id.
@@ -208,15 +211,23 @@ curl -X PATCH http://localhost:8000/auth/me/telegram \
 
 | Команда | Что делает |
 |---|---|
-| `/status` | Сводка: список серверов с последней метрикой (CPU/RAM/disk), счётчик открытых алертов, индикатор mute по каналам |
-| `/servers` | Подробный список серверов: имя, `last_seen_at`, активность |
+| `/status` | Сводка: список серверов с последней метрикой (CPU/RAM/disk), счётчик открытых алертов, индикатор mute по каналам, paused/active/down |
+| `/servers` | Подробный список серверов: имя, `last_seen_at`, состояние (active/paused/down) |
 | `/mute <server_id> <minutes> [telegram\|email\|all]` | Глушит уведомления для сервера на N минут (1–1440). Канал опционален, default `all` (оба) |
 | `/rules` | Список твоих алерт-правил с состоянием on/off, оператором и порогом |
 | `/toggle <rule_id>` | Включает/выключает правило (флипает `is_active`) |
+| `/createrule` | **Диалоговое** создание правила (только system-метрики). Шаги: сервер → имя → метрика → оператор → порог → каналы → подтверждение. Состояние живёт 10 мин в Redis (`rule_draft:<chat_id>`). |
+| `/cancel` | Отменить активный диалог `/createrule` |
 | `/delete <server_id>` | **Двухступенчатое** удаление сервера со всеми его метриками/агрегатами/правилами/событиями. Бот просит подтверждение `/delete <id> confirm` в течение 60с |
 | `/events [server_id]` | Последние 10 алерт-событий (или по конкретному серверу) с пометкой open/resolved |
+| `/pause <server_id>` | Поставить сервер на паузу: `POST /metrics` молча игнорируются, heartbeat не помечает как inactive. Состояние видно в `/servers`, `/status` и в UI |
+| `/resume <server_id>` | Снять паузу |
 
 Mute проверяется в `send_telegram_alert` и `send_email_alert` перед отправкой (каждый смотрит свой канал) — пока активна заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `GET /alerts/events`.
+
+**Heartbeat-уведомления.** Если сервер замолчал >5 минут — Celery-beat отправляет владельцу `⚠️ <server> не отвечает` (telegram + email). Когда метрики возобновляются — `✅ <server> снова в строю`. Heartbeat игнорирует mute (это критический сигнал, не шум) и `paused`-серверы (юзер сам их отключил). Heartbeat уважает только `email_alerts_enabled`.
+
+**Per-канальный opt-out на уровне правила.** В `AlertRule.notification_channels` — массив `["telegram"]` / `["email"]` / `["telegram","email"]` (default) / `[]`. Пустой массив = создаём AlertEvent + публикуем в Redis Pub/Sub, но не шлём никаких уведомлений. Управляется через REST (`POST /alerts/rules`, `PATCH /alerts/rules/{id}`) или через бот `/createrule` (на последнем шаге выбираешь `telegram` / `email` / `both` / `none`).
 
 ### Email
 
@@ -247,7 +258,8 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 
 Бэкенд отдаёт HTTP-метрики в Prometheus-формате на `/metrics/prometheus` (счётчики запросов, латентность, статус-коды — собираются через middleware `prometheus-fastapi-instrumentator`). В compose уже есть два готовых сервиса:
 
-- **`prometheus`** на `http://localhost:9090` — скрапит `app:8000/metrics/prometheus` раз в 15с. Конфиг в `prometheus.yml`.
+- **`prometheus`** на `http://localhost:9090` — скрапит `app:8000/metrics/prometheus` раз в 15с. Конфиг в `prometheus.yml`, alerting-правила в `prometheus_rules.yml`.
+- **`alertmanager`** на `http://localhost:9093` — принимает алерты от Prometheus, агрегирует, шлёт на webhook `POST /alertmanager/webhook` (логируется в `docker compose logs app`). Конфиг в `alertmanager.yml`.
 - **`grafana`** на `http://localhost:3000` — с pre-provisioned Prometheus-датасорсом **и готовым дашбордом** «PulseWatch — Backend HTTP» (4 панели: rps, latency p50/p95/p99, 5xx error rate, статус-коды). Дефолтные креды `admin`/`admin` (поменяй через `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` в `.env`).
 
 После `make up`:
@@ -257,17 +269,35 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 
 Первый запрос на `/metrics/prometheus` идёт через 15с после старта Prometheus, так что сразу после `up` метрик может ещё не быть — подожди минуту.
 
+**Готовые Prometheus-алерты** (`prometheus_rules.yml`):
+
+| Алерт | Условие | for | Severity |
+|---|---|---|---|
+| `BackendDown` | `up{job="pulsewatch"} == 0` | 1m | critical |
+| `HighRequestLatency` | p95 latency > 500ms | 5m | warning |
+| `HighErrorRate` | 5xx > 1% запросов в секунду | 5m | critical |
+
+Срабатывания идут в Alertmanager → webhook → лог. Если хочешь шлёт куда-то ещё (Slack/Telegram/email), правь `alertmanager.yml`.
+
 ## Frontend dashboard
 
 Браузерный дашборд лежит в `static/` — три файла (`index.html`, `style.css`, `app.js`) без билда и без npm. Chart.js подключён через CDN (`cdn.jsdelivr.net`).
 
-FastAPI монтирует `/static` и отдаёт `index.html` на корневой URL (`GET /`). Открой `http://localhost:8000/` — увидишь форму логина → дашборд со списком твоих серверов → клик на карточку → реал-тайм график последних 60 точек метрик.
+FastAPI монтирует `/static` и отдаёт `index.html` на корневой URL (`GET /`). Открой `http://localhost:8000/`, войди — увидишь верхнюю навигацию с пятью табами:
+
+| Таб | Что |
+|---|---|
+| Серверы | Карточки твоих серверов с last_seen, agent_version, paused/active. Клик → панель с real-time графиком CPU/RAM/Disk (60 точек, WebSocket) |
+| Правила | Таблица `AlertRule` с кнопками toggle (PATCH is_active) и delete (DELETE) |
+| События | Таблица `AlertEvent` с фильтром по серверу и кнопкой refresh, цвет статуса open/resolved |
+| Агрегаты | Выбор сервера + период (5min/час/день) → линейный график средних CPU/Memory/Disk |
+| Логи | Выбор сервера + кнопка Подключить → WebSocket `/ws/logs/{id}` стримит journald-строки в `<pre>` |
 
 Что реализовано в `static/app.js`:
 
 - **Токены в `localStorage`** под ключом `pulsewatch.tokens` (access + refresh).
 - **`apiFetch`** — обёртка над `fetch`, навешивает `Authorization: Bearer <access>`, на 401 атомарно ходит на `/auth/refresh`, обновляет пару, повторяет запрос. Если refresh тоже мёртв — выкидывает на login-форму.
-- **WebSocket** на `/ws/metrics/{id}?token=<access>` — новые точки добавляются в график без перезагрузки, скользящее окно на 60 точек. На close с кодом 1008 (auth refused) пробуем refresh и переподключаемся один раз.
+- **WebSocket** на `/ws/metrics/{id}?token=<access>` и `/ws/logs/{id}?token=<access>` — новые сообщения приходят без перезагрузки. На close с кодом 1008 (auth refused) пробуем refresh и переподключаемся один раз.
 
 Тестов на фронтенд нет — pytest не покрывает JS. Проверка ручная через браузер.
 
@@ -354,12 +384,26 @@ tests/
 docs/         # планы этапов
 ```
 
+## Quick demo
+
+```bash
+make demo
+```
+
+Поднимет `db redis app worker beat`, дождётся пока приложение взлетит, запустит `scripts/demo.py`, который:
+
+1. Регистрирует юзера `demo@pulsewatch.local` / `demopass123` (или reuse если есть).
+2. Создаёт свежий сервер `demo-srv-<rand>` и **печатает api_key один раз**.
+3. Заводит два правила: `cpu_percent > 60` и `memory_percent > 60` с cooldown 60с.
+4. Гонит фейковый агент: каждые 5с шлёт случайные метрики в диапазоне 20–90%, половина итераций пробивает порог.
+
+UI на `http://localhost:8000/` — увидишь как метрики обновляются в real-time, события появляются в `/alerts/events`. Старые demo-серверы чистятся через бот `/delete`.
+
 ## Известные ограничения / TODO
 
-- Frontend — только базовая страница: login, список серверов, график одного сервера. Нет страниц правил, событий, агрегатов, логов. Это всё доступно через API/бот, но не через UI.
-- Reuse-detection для refresh-токенов не реализован — при ротации старый jti инвалидируется, но мы не отзываем **все** сессии юзера при попытке использовать «украденный» (повторно использованный) токен. Если параноидально — добавить отдельный «used» ключ с TTL.
-- Alertmanager не подключён — Prometheus-метрики только наблюдаемы, на их основе алертов нет (наши алерты живут отдельно в Postgres + Celery).
+- Alertmanager-webhook на бэкенде только логирует — нет per-user маршрутизации в Telegram/email. Чтобы получать срабатывания админских алертов в чат — допиши хендлер в `app/api/alertmanager.py` или подключи Alertmanager напрямую к Slack/email-receiver в `alertmanager.yml`.
 - Тестов на фронтенд нет — JS не покрывается pytest. Можно добавить Playwright/Cypress, но это отдельная подготовка.
+- `/createrule` в боте поддерживает только system-метрики (cpu/memory/disk). Docker-правила (с `container_name`) — через REST.
 
 ## Лицензия
 
