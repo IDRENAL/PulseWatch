@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.api.alertmanager import router as alertmanager_router
 from app.api.alerts import router as alerts_router
 from app.api.auth import router as auth_router
 from app.api.docker_metrics import router as docker_metrics_router
@@ -44,6 +45,7 @@ app.include_router(servers_router, prefix="/servers", tags=["servers"])
 app.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
 app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
 app.include_router(docker_metrics_router, prefix="/docker-metrics", tags=["docker-metrics"])
+app.include_router(alertmanager_router, prefix="/alertmanager", tags=["alertmanager"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi stub typing
 app.include_router(websocket_router, tags=["websocket"])

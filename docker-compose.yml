@@ -101,11 +101,25 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+      - alertmanager
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus_rules.yml:/etc/prometheus/rules.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: pulsewatch_alertmanager
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
 
   grafana:
     image: grafana/grafana:latest
@@ -128,3 +142,4 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
+  alertmanager_data:
