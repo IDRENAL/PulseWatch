@@ -131,6 +131,34 @@ async def refresh_tokens(request: Request, data: RefreshRequest):
             user_id,
             old_jti,
         )
+
+        # Best-effort уведомление юзеру в Telegram (если привязан)
+        try:
+            from sqlalchemy import select
+
+            from app.database import async_session_factory
+            from app.models.user import User
+            from app.services.telegram import (
+                TelegramNotConfiguredError,
+                TelegramSendError,
+                send_message,
+            )
+
+            async with async_session_factory() as db:
+                target_user = (
+                    await db.execute(select(User).where(User.id == user_id))
+                ).scalar_one_or_none()
+            if target_user and target_user.telegram_chat_id:
+                await send_message(
+                    target_user.telegram_chat_id,
+                    "⚠️ <b>Подозрительная активность</b>\n"
+                    "Кто-то попытался использовать твой уже отозванный refresh-токен. "
+                    "На всякий случай мы закрыли все твои сессии — пожалуйста, "
+                    "залогинься заново и поменяй пароль, если не узнаёшь эту активность.",
+                )
+        except (TelegramNotConfiguredError, TelegramSendError, Exception) as exc:
+            logger.info("reuse-detection tg notify skipped: {}", exc)
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token reuse detected. All sessions revoked, please log in again.",
