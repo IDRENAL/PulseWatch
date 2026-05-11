@@ -153,6 +153,12 @@ def _refresh_key(user_id: int, jti: str) -> str:
     return f"refresh:{user_id}:{jti}"
 
 
+def _refresh_used_key(user_id: int, jti: str) -> str:
+    """Ключ-«трупик»: jti уже потрачен на ротацию. Живёт до конца TTL токена,
+    чтобы можно было заметить попытку повторного использования."""
+    return f"refresh_used:{user_id}:{jti}"
+
+
 async def store_refresh_jti(user_id: int, jti: str, ttl_seconds: int) -> None:
     """Добавляет jti в whitelist на ttl_seconds. После TTL ключ умирает сам — даже
     если мы забыли его явно отозвать.
@@ -167,6 +173,12 @@ async def is_refresh_jti_valid(user_id: int, jti: str) -> bool:
     return await r.exists(_refresh_key(user_id, jti)) == 1
 
 
+async def is_refresh_jti_used(user_id: int, jti: str) -> bool:
+    """True, если jti уже был использован для ротации. Сигнал к reuse-detection."""
+    r = _get_app_redis()
+    return await r.exists(_refresh_used_key(user_id, jti)) == 1
+
+
 async def revoke_refresh_jti(user_id: int, jti: str) -> None:
     """Удаляет jti из whitelist (logout или ротация)."""
     r = _get_app_redis()
@@ -176,8 +188,8 @@ async def revoke_refresh_jti(user_id: int, jti: str) -> None:
 async def rotate_refresh_jti(user_id: int, old_jti: str, new_jti: str, ttl_seconds: int) -> bool:
     """Атомарно отзывает old_jti и ставит new_jti. True если old_jti был валиден.
 
-    Проверка через pipeline. Если кто-то предъявит уже использованный refresh —
-    pipeline вернёт 0 на DEL и мы вернём False.
+    Если ротация прошла — помечаем old_jti как «использованный» с TTL=TTL токена,
+    чтобы reuse-detection в `/auth/refresh` мог поймать повторное использование.
     """
     r = _get_app_redis()
     old_key = _refresh_key(user_id, old_jti)
@@ -186,4 +198,21 @@ async def rotate_refresh_jti(user_id: int, old_jti: str, new_jti: str, ttl_secon
     pipe.delete(old_key)
     pipe.set(new_key, "1", ex=ttl_seconds)
     deleted, _ = await pipe.execute()
-    return deleted == 1
+    if deleted == 1:
+        await r.set(_refresh_used_key(user_id, old_jti), "1", ex=ttl_seconds)
+        return True
+    return False
+
+
+async def revoke_all_refresh_for_user(user_id: int) -> int:
+    """Стирает все активные refresh-токены юзера. Возвращает число удалённых.
+
+    Используется при reuse-detection — выкидываем все сессии, потому что не знаем
+    какая из них скомпрометирована.
+    """
+    r = _get_app_redis()
+    deleted = 0
+    async for key in r.scan_iter(match=f"refresh:{user_id}:*", count=100):
+        await r.delete(key)
+        deleted += 1
+    return deleted

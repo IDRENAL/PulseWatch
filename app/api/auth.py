@@ -20,6 +20,8 @@ from app.core.security import (
 from app.database import get_db
 from app.models.user import User
 from app.redis_client import (
+    is_refresh_jti_used,
+    revoke_all_refresh_for_user,
     revoke_refresh_jti,
     rotate_refresh_jti,
     store_refresh_jti,
@@ -117,14 +119,31 @@ async def refresh_tokens(request: Request, data: RefreshRequest):
     except JWTError:
         raise creds_exc from None
 
+    # Reuse-detection: если jti уже был потрачен на ротацию, кто-то предъявляет
+    # «украденный» (или просто старый) токен. Не знаем кто легитим — отзываем
+    # все сессии юзера, пусть логинится заново на всех устройствах.
+    if await is_refresh_jti_used(user_id, old_jti):
+        await revoke_all_refresh_for_user(user_id)
+        from loguru import logger
+
+        logger.warning(
+            "refresh reuse detected for user_id={}, jti={} — all sessions revoked",
+            user_id,
+            old_jti,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token reuse detected. All sessions revoked, please log in again.",
+        )
+
     new_access = create_access_token(subject=user_id)
     new_refresh, new_jti = create_refresh_token(subject=user_id)
 
     rotated = await rotate_refresh_jti(user_id, old_jti, new_jti, _REFRESH_TTL_SECONDS)
     if not rotated:
-        # old_jti не было в whitelist — кто-то предъявил уже отозванный refresh.
-        # Свежий new_jti мы уже поставили в pipeline — нужно его откатить, чтобы
-        # не оставить «висячий» ключ.
+        # old_jti не было в whitelist — токен либо никогда не существовал, либо
+        # истёк, либо его отозвали через logout. Просто 401, без панического сброса.
+        # Свежий new_jti мы уже поставили в pipeline — откатываем, чтобы не висел.
         await revoke_refresh_jti(user_id, new_jti)
         raise creds_exc
 
