@@ -11,6 +11,7 @@ class ServerRead(BaseModel):
     id: int
     name: str
     is_active: bool
+    paused: bool = False
     created_at: datetime
     last_seen_at: datetime | None
     agent_version: str | None = None

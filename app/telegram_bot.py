@@ -41,6 +41,8 @@ _TOGGLE_PATTERN = re.compile(r"^/toggle\s+(?P<rule_id>\d+)\s*$")
 _DELETE_PATTERN = re.compile(r"^/delete\s+(?P<server_id>\d+)(?P<confirm>\s+confirm)?\s*$")
 _EVENTS_PATTERN = re.compile(r"^/events(?:\s+(?P<server_id>\d+))?\s*$")
 _EVENTS_LIMIT = 10
+_PAUSE_PATTERN = re.compile(r"^/pause\s+(?P<server_id>\d+)\s*$")
+_RESUME_PATTERN = re.compile(r"^/resume\s+(?P<server_id>\d+)\s*$")
 
 
 def _bot_url(method: str) -> str:
@@ -108,7 +110,8 @@ async def _handle_start(client: httpx.AsyncClient, chat_id: int, text: str) -> N
             "  /mute <server_id> <minutes> [telegram|email|all]\n"
             "  /rules, /toggle <rule_id>\n"
             "  /delete <server_id>\n"
-            "  /events [server_id]",
+            "  /events [server_id]\n"
+            "  /pause <server_id>, /resume <server_id>",
         )
     else:
         await _send(client, chat_id, "❌ Юзер не найден. Возможно, аккаунт удалён.")
@@ -146,12 +149,15 @@ async def _handle_status(client: httpx.AsyncClient, chat_id: int, user: User) ->
                 )
             ).all()
 
-            metric_part = (
-                f"cpu={latest.cpu_percent:.1f}% mem={latest.memory_percent:.1f}% "
-                f"disk={latest.disk_percent:.1f}%"
-                if latest
-                else "нет данных"
-            )
+            if server.paused:
+                metric_part = "⏸ paused"
+            elif latest:
+                metric_part = (
+                    f"cpu={latest.cpu_percent:.1f}% mem={latest.memory_percent:.1f}% "
+                    f"disk={latest.disk_percent:.1f}%"
+                )
+            else:
+                metric_part = "нет данных"
             mute_parts = []
             for ch in MUTE_CHANNELS:
                 ttl = await get_channel_mute_ttl(server.id, ch)
@@ -180,8 +186,13 @@ async def _handle_servers(client: httpx.AsyncClient, chat_id: int, user: User) -
     lines = [f"🖥 Серверы ({len(servers)}):"]
     for server in servers:
         seen = server.last_seen_at.isoformat() if server.last_seen_at else "ни разу"
-        active = "✅" if server.is_active else "⏸"
-        lines.append(f"• #{server.id} {server.name} {active} last_seen={seen}")
+        if server.paused:
+            state = "⏸ paused"
+        elif server.is_active:
+            state = "✅ active"
+        else:
+            state = "❌ down"
+        lines.append(f"• #{server.id} {server.name} {state} last_seen={seen}")
     await _send(client, chat_id, "\n".join(lines))
 
 
@@ -386,6 +397,59 @@ async def _handle_events(client: httpx.AsyncClient, chat_id: int, user: User, te
     await _send(client, chat_id, "\n".join(lines))
 
 
+# ─── Команды /pause /resume — тоггл Server.paused ──────────────────────────
+
+
+async def _set_server_paused(
+    client: httpx.AsyncClient,
+    chat_id: int,
+    user: User,
+    text: str,
+    pattern: re.Pattern,
+    new_value: bool,
+    usage: str,
+) -> None:
+    match = pattern.match(text)
+    if not match:
+        await _send(client, chat_id, usage)
+        return
+
+    server_id = int(match.group("server_id"))
+    async with async_session_factory() as db:
+        server = (
+            await db.execute(
+                select(Server).where(Server.id == server_id, Server.owner_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if server is None:
+            await _send(client, chat_id, "❌ Сервер не найден или не твой.")
+            return
+
+        if server.paused == new_value:
+            state = "уже на паузе" if new_value else "и так активен"
+            await _send(client, chat_id, f"Сервер #{server_id} {server.name} {state}.")
+            return
+
+        server.paused = new_value
+        await db.commit()
+        action = (
+            "⏸ Сервер #{} {} поставлен на паузу." if new_value else "▶ Сервер #{} {} снят с паузы."
+        )
+        await _send(client, chat_id, action.format(server_id, server.name))
+
+
+async def _handle_pause(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
+    await _set_server_paused(
+        client, chat_id, user, text, _PAUSE_PATTERN, True, "Использование: /pause <server_id>"
+    )
+
+
+async def _handle_resume(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
+    await _set_server_paused(
+        client, chat_id, user, text, _RESUME_PATTERN, False, "Использование: /resume <server_id>"
+    )
+
+
 # ─── Главный диспетчер ──────────────────────────────────────────────────────
 
 
@@ -430,6 +494,10 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
         await _handle_delete(client, chat_id, user, text)
     elif text.startswith("/events"):
         await _handle_events(client, chat_id, user, text)
+    elif text.startswith("/pause"):
+        await _handle_pause(client, chat_id, user, text)
+    elif text.startswith("/resume"):
+        await _handle_resume(client, chat_id, user, text)
     else:
         await _send(
             client,
@@ -439,7 +507,8 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
             "  /mute <server_id> <minutes> [telegram|email|all]\n"
             "  /rules, /toggle <rule_id>\n"
             "  /delete <server_id>\n"
-            "  /events [server_id]",
+            "  /events [server_id]\n"
+            "  /pause <server_id>, /resume <server_id>",
         )
 
 
