@@ -1,4 +1,4 @@
-.PHONY: help up down logs shell migrate test agent flower
+.PHONY: help up down logs shell migrate test agent flower demo
 
 help:  ## показать все доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -26,3 +26,10 @@ agent:  ## запустить агент локально (без systemd)
 
 flower:  ## открыть Flower UI (Celery, появится на этапе 5)
 	xdg-open http://localhost:5555
+
+demo:  ## onboarding: создать demo-юзера/сервер/правила, гнать фейковые метрики
+	@echo "→ Поднимаю стек (db, redis, app, worker, beat)..."
+	@docker compose up -d db redis app worker beat
+	@echo "→ Жду пока приложение поднимется..."
+	@sleep 3
+	@uv run python scripts/demo.py
