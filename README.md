@@ -384,6 +384,25 @@ tests/
 docs/         # планы этапов
 ```
 
+## Backup и restore Postgres
+
+```bash
+# Создать дамп (gzip, в backups/pulsewatch_YYYYMMDD_HHMMSS.sql.gz):
+make backup
+
+# Восстановить из дампа:
+make restore FILE=backups/pulsewatch_20260511_180000.sql.gz
+```
+
+Каталог `backups/` в `.gitignore`. Для регулярных бэкапов добавь в crontab:
+
+```cron
+# Ежедневный бэкап в 03:00; pruning старше 30 дней
+0 3 * * * cd /path/to/PulseWatch && make backup && find backups -name '*.sql.gz' -mtime +30 -delete
+```
+
+`pg_dump` запускается внутри контейнера db; пользователь и имя БД берутся из `$DB_USER`/`$DB_NAME` (или `.env`). Восстановление работает и для `.sql`, и для `.sql.gz`.
+
 ## Quick demo
 
 ```bash

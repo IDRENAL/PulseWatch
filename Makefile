@@ -1,4 +1,4 @@
-.PHONY: help up down logs shell migrate test test-e2e agent flower demo
+.PHONY: help up down logs shell migrate test test-e2e agent flower demo backup restore
 
 help:  ## показать все доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -36,3 +36,21 @@ demo:  ## onboarding: создать demo-юзера/сервер/правила
 	@echo "→ Жду пока приложение поднимется..."
 	@sleep 3
 	@uv run python scripts/demo.py
+
+backup:  ## дамп Postgres в backups/<timestamp>.sql.gz (gzip — экономит место)
+	@mkdir -p backups
+	@TIMESTAMP=$$(date +%Y%m%d_%H%M%S); \
+	docker compose exec -T db pg_dump -U $${DB_USER:-$$(grep ^DB_USER .env | cut -d= -f2)} -d $${DB_NAME:-pulsewatch} \
+		| gzip > backups/pulsewatch_$$TIMESTAMP.sql.gz; \
+	echo "✅ backup → backups/pulsewatch_$$TIMESTAMP.sql.gz"
+
+restore:  ## восстановить из дампа: `make restore FILE=backups/...sql.gz`
+	@test -n "$(FILE)" || (echo "❌ укажи FILE=<путь к .sql или .sql.gz>"; exit 1)
+	@test -f "$(FILE)" || (echo "❌ файл $(FILE) не найден"; exit 1)
+	@echo "→ Восстанавливаю из $(FILE)..."
+	@if echo "$(FILE)" | grep -q '\.gz$$'; then \
+		gunzip -c "$(FILE)" | docker compose exec -T db psql -U $${DB_USER:-$$(grep ^DB_USER .env | cut -d= -f2)} -d $${DB_NAME:-pulsewatch}; \
+	else \
+		docker compose exec -T db psql -U $${DB_USER:-$$(grep ^DB_USER .env | cut -d= -f2)} -d $${DB_NAME:-pulsewatch} < "$(FILE)"; \
+	fi
+	@echo "✅ restore завершён"
