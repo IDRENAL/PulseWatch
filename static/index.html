@@ -14,6 +14,15 @@
             <button id="logout-btn">Logout</button>
         </div>
     </header>
+
+    <nav id="tabs" hidden>
+        <button class="tab" data-tab="servers">Серверы</button>
+        <button class="tab" data-tab="rules">Правила</button>
+        <button class="tab" data-tab="events">События</button>
+        <button class="tab" data-tab="aggregates">Агрегаты</button>
+        <button class="tab" data-tab="logs">Логи</button>
+    </nav>
+
     <main id="app">
         <!-- Login view -->
         <section id="login-view">
@@ -32,12 +41,10 @@
             <p id="login-error" class="error" hidden></p>
         </section>
 
-        <!-- Dashboard view -->
-        <section id="dashboard-view" hidden>
+        <!-- Servers tab -->
+        <section class="tab-view" id="view-servers" hidden>
             <h2>Серверы</h2>
             <div id="servers-list"></div>
-
-            <!-- Detail panel — появляется при клике на карточку -->
             <section id="detail-panel" hidden>
                 <h2 id="detail-title">—</h2>
                 <div class="chart-wrap">
@@ -45,7 +52,66 @@
                 </div>
             </section>
         </section>
+
+        <!-- Rules tab -->
+        <section class="tab-view" id="view-rules" hidden>
+            <h2>Алерт-правила</h2>
+            <div id="rules-table-wrap"></div>
+        </section>
+
+        <!-- Events tab -->
+        <section class="tab-view" id="view-events" hidden>
+            <h2>События</h2>
+            <div class="filter-bar">
+                <label>
+                    Сервер:
+                    <select id="events-server-filter">
+                        <option value="">все</option>
+                    </select>
+                </label>
+                <button id="events-refresh">Обновить</button>
+            </div>
+            <div id="events-table-wrap"></div>
+        </section>
+
+        <!-- Aggregates tab -->
+        <section class="tab-view" id="view-aggregates" hidden>
+            <h2>Агрегаты</h2>
+            <div class="filter-bar">
+                <label>
+                    Сервер:
+                    <select id="aggregates-server"></select>
+                </label>
+                <label>
+                    Период:
+                    <select id="aggregates-period">
+                        <option value="fivemin">5 минут</option>
+                        <option value="hourly" selected>час</option>
+                        <option value="daily">день</option>
+                    </select>
+                </label>
+                <button id="aggregates-load">Загрузить</button>
+            </div>
+            <div class="chart-wrap">
+                <canvas id="aggregates-chart"></canvas>
+            </div>
+        </section>
+
+        <!-- Logs tab -->
+        <section class="tab-view" id="view-logs" hidden>
+            <h2>Журнал логов</h2>
+            <div class="filter-bar">
+                <label>
+                    Сервер:
+                    <select id="logs-server"></select>
+                </label>
+                <button id="logs-toggle">Подключить</button>
+                <button id="logs-clear">Очистить</button>
+            </div>
+            <pre id="logs-stream"></pre>
+        </section>
     </main>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/static/app.js"></script>
 </body>

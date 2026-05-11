@@ -28,14 +28,12 @@ async function apiFetch(url, options = {}) {
 
     let response = await fetch(url, {...options, headers});
 
-    // Access протух — пробуем refresh и повторяем запрос
     if (response.status === 401 && tokens?.refresh_token) {
         const refreshed = await tryRefresh(tokens.refresh_token);
         if (refreshed) {
             headers.Authorization = `Bearer ${refreshed.access_token}`;
             response = await fetch(url, {...options, headers});
         } else {
-            // refresh тоже не сработал — выкидываем юзера на login
             clearTokens();
             renderLogin();
         }
@@ -81,9 +79,9 @@ async function login(email, password) {
 
 async function logout() {
     closeMetricsWs();
+    closeLogsWs();
     const tokens = getTokens();
     if (tokens?.refresh_token) {
-        // Best-effort, не ждём ответа критично
         await fetch("/auth/logout", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -100,37 +98,98 @@ async function fetchMe() {
     return response.json();
 }
 
+// ─── API: servers/rules/events/aggregates ───────────────────────────────────
+
 async function fetchServers() {
     const response = await apiFetch("/servers/me");
-    if (!response.ok) return [];
-    return response.json();
+    return response.ok ? response.json() : [];
 }
 
 async function fetchMetrics(serverId, limit = 60) {
     const response = await apiFetch(`/servers/${serverId}/metrics?limit=${limit}`);
-    if (!response.ok) return [];
-    return response.json();
+    return response.ok ? response.json() : [];
 }
 
-// ─── Рендеринг (минимум — переключение видимости секций) ────────────────────
-
-function renderLogin() {
-    document.getElementById("login-view").hidden = false;
-    document.getElementById("dashboard-view").hidden = true;
-    document.getElementById("user-bar").hidden = true;
-    document.getElementById("login-error").hidden = true;
-    document.getElementById("login-form").reset();
+async function fetchRules() {
+    const response = await apiFetch("/alerts/rules");
+    return response.ok ? response.json() : [];
 }
 
-async function renderDashboard(user) {
-    document.getElementById("login-view").hidden = true;
-    document.getElementById("dashboard-view").hidden = false;
-    document.getElementById("user-bar").hidden = false;
-    document.getElementById("user-email").textContent = user.email;
-
-    const servers = await fetchServers();
-    renderServers(servers);
+async function patchRule(ruleId, fields) {
+    return apiFetch(`/alerts/rules/${ruleId}`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(fields),
+    });
 }
+
+async function deleteRule(ruleId) {
+    return apiFetch(`/alerts/rules/${ruleId}`, {method: "DELETE"});
+}
+
+async function fetchEvents({serverId = null, limit = 100} = {}) {
+    const params = new URLSearchParams({limit: String(limit)});
+    if (serverId) params.set("server_id", String(serverId));
+    const response = await apiFetch(`/alerts/events?${params}`);
+    return response.ok ? response.json() : [];
+}
+
+async function fetchAggregates(serverId, period, limit = 100) {
+    const response = await apiFetch(
+        `/servers/${serverId}/metrics/aggregate?period=${period}&limit=${limit}`
+    );
+    return response.ok ? response.json() : [];
+}
+
+// ─── Состояние ──────────────────────────────────────────────────────────────
+
+const MAX_POINTS = 60;
+let serversCache = [];          // последняя загрузка /servers/me
+let currentTab = "servers";
+let currentChart = null;
+let aggregatesChart = null;
+let selectedServerId = null;
+let currentMetricsWs = null;
+let currentLogsWs = null;
+
+// ─── Вспомогательные ────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+}
+
+function wsUrl(path, params = {}) {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const tokens = getTokens();
+    const qs = new URLSearchParams({...params, token: tokens?.access_token ?? ""});
+    return `${proto}://${location.host}${path}?${qs}`;
+}
+
+// ─── Tab switching ──────────────────────────────────────────────────────────
+
+function setTab(name) {
+    currentTab = name;
+    document.querySelectorAll(".tab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.tab === name);
+    });
+    document.querySelectorAll(".tab-view").forEach((el) => {
+        el.hidden = el.id !== `view-${name}`;
+    });
+
+    // На смене таба останавливаем активные WS, чтобы не оставлять «висячих»
+    if (name !== "servers") closeMetricsWs();
+    if (name !== "logs") closeLogsWs();
+
+    // Lazy-load: подгружаем данные при первом открытии
+    if (name === "rules") loadRulesTab();
+    else if (name === "events") loadEventsTab();
+    else if (name === "aggregates") initAggregatesTab();
+    else if (name === "logs") initLogsTab();
+}
+
+// ─── Servers tab ────────────────────────────────────────────────────────────
 
 function renderServers(servers) {
     const container = document.getElementById("servers-list");
@@ -177,18 +236,9 @@ function serverCard(server) {
     return card;
 }
 
-// ─── Detail panel + Chart.js + WebSocket ───────────────────────────────────
-
-const MAX_POINTS = 60;
-
-let currentChart = null;       // экземпляр Chart, нужен чтобы destroy перед новым
-let selectedServerId = null;   // id выбранного сервера
-let currentWs = null;          // открытый WebSocket, нужен чтобы закрыть при смене
-
 async function selectServer(server) {
     selectedServerId = server.id;
 
-    // Подсветка выбранной карточки
     document.querySelectorAll(".server-card").forEach((el) => {
         el.classList.toggle("selected", Number(el.dataset.serverId) === server.id);
     });
@@ -198,108 +248,38 @@ async function selectServer(server) {
         `${server.name} (#${server.id}) — реал-тайм`;
 
     const metrics = await fetchMetrics(server.id, MAX_POINTS);
-    // API возвращает новые-сверху; для графика хотим старое-слева, новое-справа
     metrics.reverse();
     renderChart(metrics);
     openMetricsWs(server.id);
 }
 
-function openMetricsWs(serverId) {
-    // Закрываем предыдущее соединение, если было
-    closeMetricsWs();
-
-    const tokens = getTokens();
-    if (!tokens?.access_token) return;
-
-    const wsProto = location.protocol === "https:" ? "wss" : "ws";
-    const url = `${wsProto}://${location.host}/ws/metrics/${serverId}?token=${encodeURIComponent(tokens.access_token)}`;
-    const ws = new WebSocket(url);
-    currentWs = ws;
-
-    ws.onmessage = (event) => {
-        if (selectedServerId !== serverId) return;  // пользователь успел переключиться
-        try {
-            const payload = JSON.parse(event.data);
-            if (payload.type === "metric") {
-                appendPoint(payload);
-            }
-        } catch (err) {
-            console.warn("ws: bad payload", err);
-        }
-    };
-
-    ws.onclose = async (event) => {
-        if (currentWs !== ws) return;  // уже заменили — игнорируем
-
-        // Code 1008 → server refused (вероятно протухший access). Пробуем refresh
-        // и переподключиться один раз.
-        if (event.code === 1008 && tokens?.refresh_token) {
-            const refreshed = await tryRefresh(tokens.refresh_token);
-            if (refreshed && selectedServerId === serverId) {
-                openMetricsWs(serverId);
-            }
-        }
-    };
-
-    ws.onerror = () => {
-        // Логируем; полноценный reconnect-loop делать не будем для учебного проекта
-        console.warn("ws: error");
-    };
-}
-
-function closeMetricsWs() {
-    if (currentWs) {
-        currentWs.onmessage = null;
-        currentWs.onclose = null;
-        currentWs.onerror = null;
-        try {
-            currentWs.close();
-        } catch {
-            // already closed
-        }
-        currentWs = null;
-    }
-}
-
-function appendPoint(metric) {
-    if (!currentChart) return;
-
-    const label = new Date(metric.collected_at).toLocaleTimeString();
-    const data = currentChart.data;
-    data.labels.push(label);
-    data.datasets[0].data.push(metric.cpu_percent);
-    data.datasets[1].data.push(metric.memory_percent);
-    data.datasets[2].data.push(metric.disk_percent);
-
-    // Скользящее окно: оставляем только последние MAX_POINTS
-    while (data.labels.length > MAX_POINTS) {
-        data.labels.shift();
-        for (const ds of data.datasets) ds.data.shift();
-    }
-
-    currentChart.update("none");  // 'none' = без анимации, для плавного real-time
-}
-
 function renderChart(metrics) {
     const ctx = document.getElementById("metrics-chart");
-
     const labels = metrics.map((m) => new Date(m.collected_at).toLocaleTimeString());
     const cpu = metrics.map((m) => m.cpu_percent);
     const mem = metrics.map((m) => m.memory_percent);
     const disk = metrics.map((m) => m.disk_percent);
 
-    // Уничтожаем предыдущий график, иначе они накладываются на canvas
     if (currentChart) currentChart.destroy();
+    currentChart = new Chart(ctx, lineChartConfig(labels, [
+        {label: "CPU %", data: cpu, color: "#f38ba8"},
+        {label: "Memory %", data: mem, color: "#89b4fa"},
+        {label: "Disk %", data: disk, color: "#a6e3a1"},
+    ]));
+}
 
-    currentChart = new Chart(ctx, {
+function lineChartConfig(labels, series) {
+    return {
         type: "line",
         data: {
             labels,
-            datasets: [
-                {label: "CPU %", data: cpu, borderColor: "#f38ba8", backgroundColor: "transparent", tension: 0.2},
-                {label: "Memory %", data: mem, borderColor: "#89b4fa", backgroundColor: "transparent", tension: 0.2},
-                {label: "Disk %", data: disk, borderColor: "#a6e3a1", backgroundColor: "transparent", tension: 0.2},
-            ],
+            datasets: series.map((s) => ({
+                label: s.label,
+                data: s.data,
+                borderColor: s.color,
+                backgroundColor: "transparent",
+                tension: 0.2,
+            })),
         },
         options: {
             responsive: true,
@@ -314,19 +294,313 @@ function renderChart(metrics) {
                 tooltip: {backgroundColor: "#181825"},
             },
         },
+    };
+}
+
+function openMetricsWs(serverId) {
+    closeMetricsWs();
+    const tokens = getTokens();
+    if (!tokens?.access_token) return;
+
+    const ws = new WebSocket(wsUrl(`/ws/metrics/${serverId}`));
+    currentMetricsWs = ws;
+
+    ws.onmessage = (event) => {
+        if (selectedServerId !== serverId) return;
+        try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === "metric") appendMetricPoint(payload);
+        } catch (err) {
+            console.warn("ws: bad payload", err);
+        }
+    };
+
+    ws.onclose = async (event) => {
+        if (currentMetricsWs !== ws) return;
+        if (event.code === 1008 && tokens?.refresh_token) {
+            const refreshed = await tryRefresh(tokens.refresh_token);
+            if (refreshed && selectedServerId === serverId) {
+                openMetricsWs(serverId);
+            }
+        }
+    };
+}
+
+function closeMetricsWs() {
+    if (currentMetricsWs) {
+        currentMetricsWs.onmessage = null;
+        currentMetricsWs.onclose = null;
+        currentMetricsWs.onerror = null;
+        try { currentMetricsWs.close(); } catch {}
+        currentMetricsWs = null;
+    }
+}
+
+function appendMetricPoint(metric) {
+    if (!currentChart) return;
+    const label = new Date(metric.collected_at).toLocaleTimeString();
+    const data = currentChart.data;
+    data.labels.push(label);
+    data.datasets[0].data.push(metric.cpu_percent);
+    data.datasets[1].data.push(metric.memory_percent);
+    data.datasets[2].data.push(metric.disk_percent);
+    while (data.labels.length > MAX_POINTS) {
+        data.labels.shift();
+        for (const ds of data.datasets) ds.data.shift();
+    }
+    currentChart.update("none");
+}
+
+// ─── Rules tab ──────────────────────────────────────────────────────────────
+
+async function loadRulesTab() {
+    const wrap = document.getElementById("rules-table-wrap");
+    wrap.innerHTML = '<p class="empty">Загрузка…</p>';
+
+    const rules = await fetchRules();
+    if (rules.length === 0) {
+        wrap.innerHTML = '<p class="empty">У тебя нет правил. Создавай через POST /alerts/rules.</p>';
+        return;
+    }
+
+    const serverNameById = Object.fromEntries(serversCache.map((s) => [s.id, s.name]));
+    const rows = rules
+        .map((r) => {
+            const stateClass = r.is_active ? "status-on" : "status-off";
+            const stateText = r.is_active ? "on" : "off";
+            const serverName = serverNameById[r.server_id] ?? `#${r.server_id}`;
+            const container = r.container_name ? ` <span class="server-id">(${escapeHtml(r.container_name)})</span>` : "";
+            return `
+                <tr data-rule-id="${r.id}">
+                    <td>#${r.id}</td>
+                    <td>${escapeHtml(r.name)}</td>
+                    <td>${escapeHtml(serverName)}${container}</td>
+                    <td>${escapeHtml(r.metric_type)}</td>
+                    <td>${escapeHtml(r.metric_field)} ${escapeHtml(r.operator)} ${r.threshold_value}</td>
+                    <td class="${stateClass}">${stateText}</td>
+                    <td>
+                        <button class="btn-small btn-secondary" data-action="toggle">${r.is_active ? "off" : "on"}</button>
+                        <button class="btn-small btn-secondary" data-action="delete">del</button>
+                    </td>
+                </tr>
+            `;
+        })
+        .join("");
+
+    wrap.innerHTML = `
+        <table>
+            <thead>
+                <tr><th>id</th><th>name</th><th>server</th><th>type</th><th>condition</th><th>state</th><th></th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+
+    // Привязываем обработчики
+    wrap.querySelectorAll("button[data-action]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+            const tr = e.target.closest("tr");
+            const ruleId = Number(tr.dataset.ruleId);
+            const action = btn.dataset.action;
+            if (action === "toggle") {
+                const rule = rules.find((r) => r.id === ruleId);
+                await patchRule(ruleId, {is_active: !rule.is_active});
+            } else if (action === "delete") {
+                if (!confirm(`Удалить правило #${ruleId}?`)) return;
+                await deleteRule(ruleId);
+            }
+            loadRulesTab();
+        });
     });
 }
 
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = String(str);
-    return div.innerHTML;
+// ─── Events tab ─────────────────────────────────────────────────────────────
+
+function initEventsServerFilter() {
+    const sel = document.getElementById("events-server-filter");
+    const current = sel.value;
+    sel.innerHTML = '<option value="">все</option>';
+    for (const s of serversCache) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = `#${s.id} ${s.name}`;
+        sel.appendChild(opt);
+    }
+    sel.value = current;
 }
 
-// ─── Точка входа ────────────────────────────────────────────────────────────
+async function loadEventsTab() {
+    initEventsServerFilter();
+    await renderEvents();
+}
+
+async function renderEvents() {
+    const wrap = document.getElementById("events-table-wrap");
+    wrap.innerHTML = '<p class="empty">Загрузка…</p>';
+
+    const serverId = document.getElementById("events-server-filter").value || null;
+    const events = await fetchEvents({serverId, limit: 100});
+    if (events.length === 0) {
+        wrap.innerHTML = '<p class="empty">Событий не найдено.</p>';
+        return;
+    }
+
+    const rows = events
+        .map((e) => {
+            const statusClass = e.resolved_at ? "status-resolved" : "status-open";
+            const statusText = e.resolved_at ? "resolved" : "open";
+            const resolvedAt = e.resolved_at ? new Date(e.resolved_at).toLocaleString() : "—";
+            return `
+                <tr>
+                    <td>#${e.id}</td>
+                    <td>#${e.server_id}${e.container_name ? ` / ${escapeHtml(e.container_name)}` : ""}</td>
+                    <td>#${e.rule_id}</td>
+                    <td>${e.metric_value} (порог ${e.threshold_value})</td>
+                    <td class="${statusClass}">${statusText}</td>
+                    <td>${new Date(e.created_at).toLocaleString()}</td>
+                    <td>${escapeHtml(resolvedAt)}</td>
+                </tr>
+            `;
+        })
+        .join("");
+
+    wrap.innerHTML = `
+        <table>
+            <thead>
+                <tr><th>id</th><th>server</th><th>rule</th><th>value</th><th>status</th><th>created</th><th>resolved</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+// ─── Aggregates tab ─────────────────────────────────────────────────────────
+
+function initAggregatesTab() {
+    const sel = document.getElementById("aggregates-server");
+    const current = sel.value;
+    sel.innerHTML = "";
+    for (const s of serversCache) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = `#${s.id} ${s.name}`;
+        sel.appendChild(opt);
+    }
+    sel.value = current || (serversCache[0]?.id ?? "");
+}
+
+async function loadAggregatesChart() {
+    const serverId = document.getElementById("aggregates-server").value;
+    const period = document.getElementById("aggregates-period").value;
+    if (!serverId) return;
+
+    const data = await fetchAggregates(serverId, period, 100);
+    // API отдаёт в порядке desc — переворачиваем для графика
+    data.reverse();
+
+    const labels = data.map((d) => new Date(d.period_start).toLocaleString());
+    const ctx = document.getElementById("aggregates-chart");
+
+    if (aggregatesChart) aggregatesChart.destroy();
+    aggregatesChart = new Chart(ctx, lineChartConfig(labels, [
+        {label: "CPU avg", data: data.map((d) => d.avg_cpu), color: "#f38ba8"},
+        {label: "Memory avg", data: data.map((d) => d.avg_memory), color: "#89b4fa"},
+        {label: "Disk avg", data: data.map((d) => d.avg_disk), color: "#a6e3a1"},
+    ]));
+}
+
+// ─── Logs tab ───────────────────────────────────────────────────────────────
+
+function initLogsTab() {
+    const sel = document.getElementById("logs-server");
+    const current = sel.value;
+    sel.innerHTML = "";
+    for (const s of serversCache) {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = `#${s.id} ${s.name}`;
+        sel.appendChild(opt);
+    }
+    sel.value = current || (serversCache[0]?.id ?? "");
+    updateLogsToggleButton();
+}
+
+function updateLogsToggleButton() {
+    const btn = document.getElementById("logs-toggle");
+    btn.textContent = currentLogsWs ? "Отключить" : "Подключить";
+}
+
+function toggleLogsWs() {
+    if (currentLogsWs) {
+        closeLogsWs();
+    } else {
+        const serverId = document.getElementById("logs-server").value;
+        if (serverId) openLogsWs(Number(serverId));
+    }
+    updateLogsToggleButton();
+}
+
+function openLogsWs(serverId) {
+    closeLogsWs();
+    const tokens = getTokens();
+    if (!tokens?.access_token) return;
+
+    const ws = new WebSocket(wsUrl(`/ws/logs/${serverId}`));
+    currentLogsWs = ws;
+
+    ws.onmessage = (event) => {
+        const stream = document.getElementById("logs-stream");
+        stream.textContent += event.data + "\n";
+        stream.scrollTop = stream.scrollHeight;
+    };
+
+    ws.onclose = async (event) => {
+        if (currentLogsWs !== ws) return;
+        currentLogsWs = null;
+        updateLogsToggleButton();
+        if (event.code === 1008 && tokens?.refresh_token) {
+            const refreshed = await tryRefresh(tokens.refresh_token);
+            if (refreshed) openLogsWs(serverId);
+            updateLogsToggleButton();
+        }
+    };
+}
+
+function closeLogsWs() {
+    if (currentLogsWs) {
+        currentLogsWs.onmessage = null;
+        currentLogsWs.onclose = null;
+        currentLogsWs.onerror = null;
+        try { currentLogsWs.close(); } catch {}
+        currentLogsWs = null;
+    }
+}
+
+// ─── Login/Dashboard ────────────────────────────────────────────────────────
+
+function renderLogin() {
+    document.getElementById("login-view").hidden = false;
+    document.querySelectorAll(".tab-view").forEach((el) => (el.hidden = true));
+    document.getElementById("tabs").hidden = true;
+    document.getElementById("user-bar").hidden = true;
+    document.getElementById("login-error").hidden = true;
+    document.getElementById("login-form").reset();
+}
+
+async function renderDashboard(user) {
+    document.getElementById("login-view").hidden = true;
+    document.getElementById("tabs").hidden = false;
+    document.getElementById("user-bar").hidden = false;
+    document.getElementById("user-email").textContent = user.email;
+
+    serversCache = await fetchServers();
+    renderServers(serversCache);
+    setTab("servers");
+}
+
+// ─── Init ───────────────────────────────────────────────────────────────────
 
 async function init() {
-    // Login form submit
     document.getElementById("login-form").addEventListener("submit", async (e) => {
         e.preventDefault();
         const email = document.getElementById("login-email").value;
@@ -345,10 +619,26 @@ async function init() {
         }
     });
 
-    // Logout button
     document.getElementById("logout-btn").addEventListener("click", logout);
 
-    // Если уже залогинены — сразу рисуем дашборд
+    // Tabs
+    document.querySelectorAll(".tab").forEach((btn) => {
+        btn.addEventListener("click", () => setTab(btn.dataset.tab));
+    });
+
+    // Events tab handlers
+    document.getElementById("events-refresh").addEventListener("click", renderEvents);
+    document.getElementById("events-server-filter").addEventListener("change", renderEvents);
+
+    // Aggregates tab handlers
+    document.getElementById("aggregates-load").addEventListener("click", loadAggregatesChart);
+
+    // Logs tab handlers
+    document.getElementById("logs-toggle").addEventListener("click", toggleLogsWs);
+    document.getElementById("logs-clear").addEventListener("click", () => {
+        document.getElementById("logs-stream").textContent = "";
+    });
+
     if (getTokens()) {
         const user = await fetchMe();
         if (user) {
