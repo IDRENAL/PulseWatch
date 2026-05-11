@@ -9,41 +9,47 @@
 <body>
     <header>
         <h1>PulseWatch</h1>
-        <div id="user-bar" hidden>
-            <span id="user-email"></span>
-            <button id="logout-btn">Logout</button>
+        <div class="header-controls">
+            <select id="lang-switcher" aria-label="Language">
+                <option value="ru">RU</option>
+                <option value="en">EN</option>
+            </select>
+            <div id="user-bar" hidden>
+                <span id="user-email"></span>
+                <button id="logout-btn" data-i18n="logout">Logout</button>
+            </div>
         </div>
     </header>
 
     <nav id="tabs" hidden>
-        <button class="tab" data-tab="servers">Серверы</button>
-        <button class="tab" data-tab="rules">Правила</button>
-        <button class="tab" data-tab="events">События</button>
-        <button class="tab" data-tab="aggregates">Агрегаты</button>
-        <button class="tab" data-tab="logs">Логи</button>
+        <button class="tab" data-tab="servers" data-i18n="tab.servers">Серверы</button>
+        <button class="tab" data-tab="rules" data-i18n="tab.rules">Правила</button>
+        <button class="tab" data-tab="events" data-i18n="tab.events">События</button>
+        <button class="tab" data-tab="aggregates" data-i18n="tab.aggregates">Агрегаты</button>
+        <button class="tab" data-tab="logs" data-i18n="tab.logs">Логи</button>
     </nav>
 
     <main id="app">
         <!-- Login view -->
         <section id="login-view">
-            <h2>Вход</h2>
+            <h2 data-i18n="login.title">Вход</h2>
             <form id="login-form">
                 <label>
-                    Email
+                    <span data-i18n="login.email">Email</span>
                     <input type="email" id="login-email" required autocomplete="email">
                 </label>
                 <label>
-                    Пароль
+                    <span data-i18n="login.password">Пароль</span>
                     <input type="password" id="login-password" required autocomplete="current-password">
                 </label>
-                <button type="submit">Войти</button>
+                <button type="submit" data-i18n="login.submit">Войти</button>
             </form>
             <p id="login-error" class="error" hidden></p>
         </section>
 
         <!-- Servers tab -->
         <section class="tab-view" id="view-servers" hidden>
-            <h2>Серверы</h2>
+            <h2 data-i18n="tab.servers">Серверы</h2>
             <div id="servers-list"></div>
             <section id="detail-panel" hidden>
                 <h2 id="detail-title">—</h2>
@@ -55,28 +61,28 @@
 
         <!-- Rules tab -->
         <section class="tab-view" id="view-rules" hidden>
-            <h2>Алерт-правила</h2>
-            <button id="rules-new-toggle" class="btn-small">Создать правило</button>
+            <h2 data-i18n="rules.title">Алерт-правила</h2>
+            <button id="rules-new-toggle" class="btn-small" data-i18n="rules.create">Создать правило</button>
             <form id="rules-new-form" class="rule-form" hidden>
-                <label>Сервер
+                <label><span data-i18n="rules.field.server">Сервер</span>
                     <select id="rule-server" required></select>
                 </label>
-                <label>Имя
+                <label><span data-i18n="rules.field.name">Имя</span>
                     <input type="text" id="rule-name" maxlength="255" required>
                 </label>
-                <label>Тип метрики
+                <label><span data-i18n="rules.field.metric_type">Тип метрики</span>
                     <select id="rule-metric-type">
                         <option value="system">system</option>
                         <option value="docker">docker</option>
                     </select>
                 </label>
-                <label id="rule-container-wrap" hidden>Имя контейнера (пусто = любой)
+                <label id="rule-container-wrap" hidden><span data-i18n="rules.field.container">Имя контейнера (пусто = любой)</span>
                     <input type="text" id="rule-container" maxlength="255">
                 </label>
-                <label>Метрика
+                <label><span data-i18n="rules.field.metric">Метрика</span>
                     <select id="rule-metric-field"></select>
                 </label>
-                <label>Оператор
+                <label><span data-i18n="rules.field.operator">Оператор</span>
                     <select id="rule-operator">
                         <option value="gt">gt</option>
                         <option value="gte">gte</option>
@@ -86,13 +92,13 @@
                         <option value="neq">neq</option>
                     </select>
                 </label>
-                <label>Порог
+                <label><span data-i18n="rules.field.threshold">Порог</span>
                     <input type="number" id="rule-threshold" step="any" required>
                 </label>
-                <label>Cooldown (сек)
+                <label><span data-i18n="rules.field.cooldown">Cooldown (сек)</span>
                     <input type="number" id="rule-cooldown" min="0" value="300">
                 </label>
-                <label class="rule-channels">Каналы:
+                <label class="rule-channels"><span data-i18n="rules.field.channels">Каналы:</span>
                     <span>
                         <input type="checkbox" id="rule-channel-telegram" checked> telegram
                     </span>
@@ -101,8 +107,8 @@
                     </span>
                 </label>
                 <div>
-                    <button type="submit">Создать</button>
-                    <button type="button" id="rules-new-cancel" class="btn-secondary">Отмена</button>
+                    <button type="submit" data-i18n="rules.submit">Создать</button>
+                    <button type="button" id="rules-new-cancel" class="btn-secondary" data-i18n="cancel">Отмена</button>
                 </div>
                 <p id="rules-new-error" class="error" hidden></p>
             </form>
@@ -111,36 +117,36 @@
 
         <!-- Events tab -->
         <section class="tab-view" id="view-events" hidden>
-            <h2>События</h2>
+            <h2 data-i18n="tab.events">События</h2>
             <div class="filter-bar">
                 <label>
-                    Сервер:
+                    <span data-i18n="filter.server">Сервер:</span>
                     <select id="events-server-filter">
-                        <option value="">все</option>
+                        <option value="" data-i18n="filter.all">все</option>
                     </select>
                 </label>
-                <button id="events-refresh">Обновить</button>
+                <button id="events-refresh" data-i18n="refresh">Обновить</button>
             </div>
             <div id="events-table-wrap"></div>
         </section>
 
         <!-- Aggregates tab -->
         <section class="tab-view" id="view-aggregates" hidden>
-            <h2>Агрегаты</h2>
+            <h2 data-i18n="tab.aggregates">Агрегаты</h2>
             <div class="filter-bar">
                 <label>
-                    Сервер:
+                    <span data-i18n="filter.server">Сервер:</span>
                     <select id="aggregates-server"></select>
                 </label>
                 <label>
-                    Период:
+                    <span data-i18n="filter.period">Период:</span>
                     <select id="aggregates-period">
-                        <option value="fivemin">5 минут</option>
-                        <option value="hourly" selected>час</option>
-                        <option value="daily">день</option>
+                        <option value="fivemin" data-i18n="period.fivemin">5 минут</option>
+                        <option value="hourly" selected data-i18n="period.hourly">час</option>
+                        <option value="daily" data-i18n="period.daily">день</option>
                     </select>
                 </label>
-                <button id="aggregates-load">Загрузить</button>
+                <button id="aggregates-load" data-i18n="load">Загрузить</button>
             </div>
             <div class="chart-wrap">
                 <canvas id="aggregates-chart"></canvas>
@@ -149,14 +155,14 @@
 
         <!-- Logs tab -->
         <section class="tab-view" id="view-logs" hidden>
-            <h2>Журнал логов</h2>
+            <h2 data-i18n="logs.title">Журнал логов</h2>
             <div class="filter-bar">
                 <label>
-                    Сервер:
+                    <span data-i18n="filter.server">Сервер:</span>
                     <select id="logs-server"></select>
                 </label>
-                <button id="logs-toggle">Подключить</button>
-                <button id="logs-clear">Очистить</button>
+                <button id="logs-toggle" data-i18n="logs.connect">Подключить</button>
+                <button id="logs-clear" data-i18n="logs.clear">Очистить</button>
             </div>
             <pre id="logs-stream"></pre>
         </section>
