@@ -1,5 +1,107 @@
 // PulseWatch frontend — vanilla JS, без сборки
 
+// ─── i18n: ru/en через data-i18n атрибут ───────────────────────────────────
+
+const LANG_KEY = "pulsewatch.lang";
+
+const I18N = {
+    ru: {
+        "logout": "Logout",
+        "cancel": "Отмена",
+        "refresh": "Обновить",
+        "load": "Загрузить",
+        "tab.servers": "Серверы",
+        "tab.rules": "Правила",
+        "tab.events": "События",
+        "tab.aggregates": "Агрегаты",
+        "tab.logs": "Логи",
+        "login.title": "Вход",
+        "login.email": "Email",
+        "login.password": "Пароль",
+        "login.submit": "Войти",
+        "rules.title": "Алерт-правила",
+        "rules.create": "Создать правило",
+        "rules.submit": "Создать",
+        "rules.field.server": "Сервер",
+        "rules.field.name": "Имя",
+        "rules.field.metric_type": "Тип метрики",
+        "rules.field.container": "Имя контейнера (пусто = любой)",
+        "rules.field.metric": "Метрика",
+        "rules.field.operator": "Оператор",
+        "rules.field.threshold": "Порог",
+        "rules.field.cooldown": "Cooldown (сек)",
+        "rules.field.channels": "Каналы:",
+        "filter.server": "Сервер:",
+        "filter.all": "все",
+        "filter.period": "Период:",
+        "period.fivemin": "5 минут",
+        "period.hourly": "час",
+        "period.daily": "день",
+        "logs.title": "Журнал логов",
+        "logs.connect": "Подключить",
+        "logs.disconnect": "Отключить",
+        "logs.clear": "Очистить",
+    },
+    en: {
+        "logout": "Logout",
+        "cancel": "Cancel",
+        "refresh": "Refresh",
+        "load": "Load",
+        "tab.servers": "Servers",
+        "tab.rules": "Rules",
+        "tab.events": "Events",
+        "tab.aggregates": "Aggregates",
+        "tab.logs": "Logs",
+        "login.title": "Sign in",
+        "login.email": "Email",
+        "login.password": "Password",
+        "login.submit": "Sign in",
+        "rules.title": "Alert rules",
+        "rules.create": "Create rule",
+        "rules.submit": "Create",
+        "rules.field.server": "Server",
+        "rules.field.name": "Name",
+        "rules.field.metric_type": "Metric type",
+        "rules.field.container": "Container name (empty = any)",
+        "rules.field.metric": "Metric",
+        "rules.field.operator": "Operator",
+        "rules.field.threshold": "Threshold",
+        "rules.field.cooldown": "Cooldown (sec)",
+        "rules.field.channels": "Channels:",
+        "filter.server": "Server:",
+        "filter.all": "all",
+        "filter.period": "Period:",
+        "period.fivemin": "5 min",
+        "period.hourly": "hour",
+        "period.daily": "day",
+        "logs.title": "Journal logs",
+        "logs.connect": "Connect",
+        "logs.disconnect": "Disconnect",
+        "logs.clear": "Clear",
+    },
+};
+
+let currentLang = localStorage.getItem(LANG_KEY) || (navigator.language?.startsWith("en") ? "en" : "ru");
+
+function t(key) {
+    return I18N[currentLang]?.[key] ?? I18N.ru[key] ?? key;
+}
+
+function applyTranslations() {
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+        el.textContent = t(el.dataset.i18n);
+    });
+    document.documentElement.lang = currentLang;
+}
+
+function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem(LANG_KEY, lang);
+    applyTranslations();
+    // Перерисовать табы которые рисуются программно (rules/events table, logs button)
+    updateLogsToggleButton();
+}
+
 // ─── Хранение токенов ───────────────────────────────────────────────────────
 
 const STORAGE_KEY = "pulsewatch.tokens";
@@ -602,7 +704,7 @@ function initLogsTab() {
 
 function updateLogsToggleButton() {
     const btn = document.getElementById("logs-toggle");
-    btn.textContent = currentLogsWs ? "Отключить" : "Подключить";
+    btn.textContent = currentLogsWs ? t("logs.disconnect") : t("logs.connect");
 }
 
 function toggleLogsWs() {
@@ -676,6 +778,12 @@ async function renderDashboard(user) {
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 async function init() {
+    // i18n init: применяем сохранённый язык + слушаем смену
+    const langSel = document.getElementById("lang-switcher");
+    langSel.value = currentLang;
+    langSel.addEventListener("change", (e) => setLang(e.target.value));
+    applyTranslations();
+
     document.getElementById("login-form").addEventListener("submit", async (e) => {
         e.preventDefault();
         const email = document.getElementById("login-email").value;
