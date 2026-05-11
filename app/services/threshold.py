@@ -9,8 +9,8 @@ from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
 from app.redis_client import publish_alert
 
 
-def _enqueue_notifications(event_id: int) -> None:
-    """Ставит задачи отправки уведомлений (Telegram + email) в Celery-очередь.
+def _enqueue_notifications(event_id: int, channels: list[str]) -> None:
+    """Ставит задачи отправки уведомлений в Celery-очередь по каналам из правила.
 
     Импорт лежит внутри функции, чтобы не тянуть Celery (и Redis-клиент брокера)
     в код, который тестируется без воркера. Best-effort — если очередь недоступна,
@@ -19,8 +19,10 @@ def _enqueue_notifications(event_id: int) -> None:
     try:
         from app.tasks.notification_tasks import send_email_alert, send_telegram_alert
 
-        send_telegram_alert.delay(event_id)
-        send_email_alert.delay(event_id)
+        if "telegram" in channels:
+            send_telegram_alert.delay(event_id)
+        if "email" in channels:
+            send_email_alert.delay(event_id)
     except Exception as exc:
         logger.warning("Failed to enqueue notifications for event_id={}: {}", event_id, exc)
 
@@ -91,7 +93,7 @@ async def evaluate_system_metrics(
         await db.commit()
         for event, rule in pending:
             await db.refresh(event)
-            _enqueue_notifications(event.id)
+            _enqueue_notifications(event.id, rule.notification_channels)
             # Публикация в Redis (best-effort)
             try:
                 await publish_alert(
@@ -170,7 +172,7 @@ async def evaluate_docker_metrics(
         await db.commit()
         for event, rule in pending:
             await db.refresh(event)
-            _enqueue_notifications(event.id)
+            _enqueue_notifications(event.id, rule.notification_channels)
             try:
                 await publish_alert(
                     server_id=server_id,

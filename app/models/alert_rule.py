@@ -1,7 +1,8 @@
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, func, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -41,6 +42,12 @@ class AlertRule(Base):
     )  # только для docker-правил
     cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notification_channels: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        default=lambda: ["telegram", "email"],
+        server_default=text("ARRAY['telegram','email']::text[]"),
+    )
     last_triggered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
