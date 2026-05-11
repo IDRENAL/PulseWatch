@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Резервные копии Postgres
+backups/
+
 # Python
 __pycache__/
 *.py[cod]
