@@ -923,3 +923,92 @@ def test_send_email_alert_telegram_mute_does_not_block_email():
         send_email_alert(event_id=1)
 
     send_mock.assert_called_once()
+
+
+# ─── Bot command: /events ───────────────────────────────────────────────────
+
+
+async def test_bot_events_empty():
+    """`/events` без событий → 'Событий нет'."""
+    from app.telegram_bot import _handle_events
+
+    events_result = MagicMock()
+    events_result.tuples.return_value.all.return_value = []
+    cm, _ = _session_cm_with_execute(events_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_events(AsyncMock(), 555, MagicMock(id=1), "/events")
+
+    text = send_mock.call_args[0][2]
+    assert "нет" in text.lower()
+
+
+async def test_bot_events_lists_open_and_resolved():
+    """`/events` → показывает оба статуса."""
+    from app.telegram_bot import _handle_events
+
+    user = MagicMock(id=1)
+    open_event = MagicMock(
+        id=10,
+        metric_value=95.0,
+        threshold_value=90.0,
+        resolved_at=None,
+        created_at=datetime(2026, 5, 11, 12, 30, tzinfo=UTC),
+    )
+    resolved_event = MagicMock(
+        id=9,
+        metric_value=85.0,
+        threshold_value=80.0,
+        resolved_at=datetime(2026, 5, 11, 12, 0, tzinfo=UTC),
+        created_at=datetime(2026, 5, 11, 11, 55, tzinfo=UTC),
+    )
+    events_result = MagicMock()
+    events_result.tuples.return_value.all.return_value = [
+        (open_event, "cpu high", "prod-1"),
+        (resolved_event, "mem high", "prod-1"),
+    ]
+    cm, _ = _session_cm_with_execute(events_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_events(AsyncMock(), 555, user, "/events")
+
+    text = send_mock.call_args[0][2]
+    assert "#10" in text and "cpu high" in text and "open" in text
+    assert "#9" in text and "mem high" in text and "resolved" in text
+    assert "prod-1" in text
+
+
+async def test_bot_events_filtered_by_server():
+    """`/events <id>` фильтрует по server_id (видно в where на stmt — проверим через результат)."""
+    from app.telegram_bot import _handle_events
+
+    events_result = MagicMock()
+    events_result.tuples.return_value.all.return_value = []
+    cm, sess = _session_cm_with_execute(events_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_events(AsyncMock(), 555, MagicMock(id=1), "/events 42")
+
+    sess.execute.assert_awaited_once()
+    text = send_mock.call_args[0][2]
+    assert "#42" in text  # упоминание в "Событий для #42 нет"
+
+
+async def test_bot_events_bad_format():
+    """`/events foo` → подсказка."""
+    from app.telegram_bot import _handle_events
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_events(AsyncMock(), 555, MagicMock(id=1), "/events foo")
+
+    text = send_mock.call_args[0][2]
+    assert "Использование" in text

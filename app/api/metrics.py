@@ -28,6 +28,8 @@ async def submit_metric(
     db.add(new_metric)
 
     server.last_seen_at = func.now()
+    if data.agent_version and data.agent_version != server.agent_version:
+        server.agent_version = data.agent_version
 
     await db.commit()
     await db.refresh(new_metric)

@@ -3,6 +3,7 @@ import signal
 
 from loguru import logger
 
+from agent import __version__ as agent_version
 from agent.collectors.docker_collector import collect_docker_metrics
 from agent.collectors.system import collect_system_metrics
 from agent.config import settings
@@ -34,6 +35,7 @@ async def run() -> None:
         api_url=settings.api_url,
         api_key=settings.api_key,
         timeout=settings.request_timeout_seconds,
+        agent_version=agent_version,
     )
 
     stop_event = asyncio.Event()

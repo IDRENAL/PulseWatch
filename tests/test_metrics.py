@@ -197,3 +197,90 @@ async def test_submit_metric_updates_last_seen_at(
     servers = (await client.get("/servers/me", headers=auth_headers)).json()
     found = next(s for s in servers if s["id"] == server_id)
     assert found["last_seen_at"] is not None
+
+
+async def test_submit_metric_records_agent_version(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    server_with_key: dict,
+):
+    """POST /metrics с agent_version → ServerRead.agent_version обновляется."""
+    server_id = server_with_key["id"]
+    api_key = server_with_key["api_key"]
+
+    # сразу после регистрации — версия неизвестна
+    assert server_with_key.get("agent_version") is None
+
+    await client.post(
+        "/metrics",
+        json={
+            "cpu_percent": 5.0,
+            "memory_percent": 5.0,
+            "disk_percent": 5.0,
+            "agent_version": "1.2.3",
+        },
+        headers={"X-API-Key": api_key},
+    )
+
+    servers = (await client.get("/servers/me", headers=auth_headers)).json()
+    found = next(s for s in servers if s["id"] == server_id)
+    assert found["agent_version"] == "1.2.3"
+
+
+async def test_submit_metric_without_agent_version_keeps_existing(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    server_with_key: dict,
+):
+    """Метрика без agent_version не затирает уже сохранённую версию."""
+    server_id = server_with_key["id"]
+    api_key = server_with_key["api_key"]
+
+    # Первый раз: версия 1.0.0
+    await client.post(
+        "/metrics",
+        json={
+            "cpu_percent": 1.0,
+            "memory_percent": 1.0,
+            "disk_percent": 1.0,
+            "agent_version": "1.0.0",
+        },
+        headers={"X-API-Key": api_key},
+    )
+
+    # Второй раз: без поля
+    await client.post(
+        "/metrics",
+        json={"cpu_percent": 2.0, "memory_percent": 2.0, "disk_percent": 2.0},
+        headers={"X-API-Key": api_key},
+    )
+
+    servers = (await client.get("/servers/me", headers=auth_headers)).json()
+    found = next(s for s in servers if s["id"] == server_id)
+    assert found["agent_version"] == "1.0.0"
+
+
+async def test_submit_metric_updates_agent_version_when_changed(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    server_with_key: dict,
+):
+    """При смене версии (например, после обновления агента) поле обновляется."""
+    server_id = server_with_key["id"]
+    api_key = server_with_key["api_key"]
+
+    for version in ("1.0.0", "1.0.1", "2.0.0"):
+        await client.post(
+            "/metrics",
+            json={
+                "cpu_percent": 1.0,
+                "memory_percent": 1.0,
+                "disk_percent": 1.0,
+                "agent_version": version,
+            },
+            headers={"X-API-Key": api_key},
+        )
+
+    servers = (await client.get("/servers/me", headers=auth_headers)).json()
+    found = next(s for s in servers if s["id"] == server_id)
+    assert found["agent_version"] == "2.0.0"
