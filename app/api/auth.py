@@ -2,6 +2,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,11 +10,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core.rate_limit import limiter
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_password,
+    verify_password,
+)
 from app.database import get_db
 from app.models.user import User
-from app.redis_client import store_tg_link_code
-from app.schemas.token import Token
+from app.redis_client import (
+    revoke_refresh_jti,
+    rotate_refresh_jti,
+    store_refresh_jti,
+    store_tg_link_code,
+)
+from app.schemas.token import RefreshRequest, Token
 from app.schemas.user import (
     EmailAlertsToggle,
     TelegramLink,
@@ -21,6 +33,8 @@ from app.schemas.user import (
     UserCreate,
     UserRead,
 )
+
+_REFRESH_TTL_SECONDS = settings.refresh_token_expire_days * 24 * 60 * 60
 
 router = APIRouter()
 
@@ -79,11 +93,54 @@ async def login(
             detail="Incorrect email or password",
         )
 
-    # ШАГ 3: создать токен
-    token = create_access_token(subject=user.id)
+    # ШАГ 3: создать пару (access + refresh), refresh — в whitelist Redis
+    access = create_access_token(subject=user.id)
+    refresh, jti = create_refresh_token(subject=user.id)
+    await store_refresh_jti(user.id, jti, _REFRESH_TTL_SECONDS)
 
-    # ШАГ 4: вернуть токен
-    return Token(access_token=token, token_type="bearer")
+    return Token(access_token=access, refresh_token=refresh, token_type="bearer")
+
+
+@router.post("/refresh", response_model=Token)
+@limiter.limit("5/minute")
+async def refresh_tokens(request: Request, data: RefreshRequest):
+    """Обменивает refresh-токен на новую пару (access + refresh). Старый refresh
+    инвалидируется (rotation). Если jti уже отозван — 401.
+    """
+    creds_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token",
+    )
+
+    try:
+        user_id, old_jti = decode_refresh_token(data.refresh_token)
+    except JWTError:
+        raise creds_exc from None
+
+    new_access = create_access_token(subject=user_id)
+    new_refresh, new_jti = create_refresh_token(subject=user_id)
+
+    rotated = await rotate_refresh_jti(user_id, old_jti, new_jti, _REFRESH_TTL_SECONDS)
+    if not rotated:
+        # old_jti не было в whitelist — кто-то предъявил уже отозванный refresh.
+        # Свежий new_jti мы уже поставили в pipeline — нужно его откатить, чтобы
+        # не оставить «висячий» ключ.
+        await revoke_refresh_jti(user_id, new_jti)
+        raise creds_exc
+
+    return Token(access_token=new_access, refresh_token=new_refresh, token_type="bearer")
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(data: RefreshRequest):
+    """Отзывает refresh-токен. Идемпотентно: повторный logout с тем же токеном
+    или с уже истёкшим — тоже 204.
+    """
+    try:
+        user_id, jti = decode_refresh_token(data.refresh_token)
+    except JWTError:
+        return  # 204 — невалидный токен тоже считаем «и так уже отозванным»
+    await revoke_refresh_jti(user_id, jti)
 
 
 @router.get("/me", response_model=UserRead)

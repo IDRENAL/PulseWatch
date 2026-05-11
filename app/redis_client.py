@@ -144,3 +144,46 @@ async def consume_pending_delete(chat_id: int, server_id: int) -> bool:
     pipe.delete(key)
     raw, _ = await pipe.execute()
     return raw is not None and int(raw) == server_id
+
+
+# ─── Refresh-токены: whitelist в Redis ──────────────────────────────────────
+
+
+def _refresh_key(user_id: int, jti: str) -> str:
+    return f"refresh:{user_id}:{jti}"
+
+
+async def store_refresh_jti(user_id: int, jti: str, ttl_seconds: int) -> None:
+    """Добавляет jti в whitelist на ttl_seconds. После TTL ключ умирает сам — даже
+    если мы забыли его явно отозвать.
+    """
+    r = _get_app_redis()
+    await r.set(_refresh_key(user_id, jti), "1", ex=ttl_seconds)
+
+
+async def is_refresh_jti_valid(user_id: int, jti: str) -> bool:
+    """True, если jti в whitelist (не отозван и не истёк)."""
+    r = _get_app_redis()
+    return await r.exists(_refresh_key(user_id, jti)) == 1
+
+
+async def revoke_refresh_jti(user_id: int, jti: str) -> None:
+    """Удаляет jti из whitelist (logout или ротация)."""
+    r = _get_app_redis()
+    await r.delete(_refresh_key(user_id, jti))
+
+
+async def rotate_refresh_jti(user_id: int, old_jti: str, new_jti: str, ttl_seconds: int) -> bool:
+    """Атомарно отзывает old_jti и ставит new_jti. True если old_jti был валиден.
+
+    Проверка через pipeline. Если кто-то предъявит уже использованный refresh —
+    pipeline вернёт 0 на DEL и мы вернём False.
+    """
+    r = _get_app_redis()
+    old_key = _refresh_key(user_id, old_jti)
+    new_key = _refresh_key(user_id, new_jti)
+    pipe = r.pipeline()
+    pipe.delete(old_key)
+    pipe.set(new_key, "1", ex=ttl_seconds)
+    deleted, _ = await pipe.execute()
+    return deleted == 1
