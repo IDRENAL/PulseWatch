@@ -79,6 +79,41 @@ async def list_my_servers(
     return servers
 
 
+@router.post("/{server_id}/rotate-key", response_model=ServerWithKey)
+async def rotate_api_key(
+    server_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ротация API-ключа сервера. Генерит новый секрет, заменяет api_key_hash в БД,
+    возвращает новый api_key в формате `<id>.<secret>` — показывается ОДИН раз.
+    Старый ключ моментально перестаёт работать; агент нужно обновить.
+    """
+    server = (
+        await db.execute(
+            select(Server).where(Server.id == server_id, Server.owner_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+    if server is None:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    secret = secrets.token_urlsafe(32)
+    server.api_key_hash = hash_password(secret)
+    await db.commit()
+    await db.refresh(server)
+
+    return ServerWithKey(
+        id=server.id,
+        name=server.name,
+        is_active=server.is_active,
+        paused=server.paused,
+        created_at=server.created_at,
+        last_seen_at=server.last_seen_at,
+        agent_version=server.agent_version,
+        api_key=f"{server.id}.{secret}",
+    )
+
+
 @router.get("/dashboard")
 async def dashboard(
     current_user: User = Depends(get_current_user),
