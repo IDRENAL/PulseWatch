@@ -10,7 +10,7 @@ class DockerMetric(Base):
     __tablename__ = "docker_metrics"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id"))
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     container_id: Mapped[str]
     container_name: Mapped[str]
     image: Mapped[str]

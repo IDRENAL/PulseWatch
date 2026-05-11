@@ -404,7 +404,7 @@ async def test_bot_status_authenticated_user(monkeypatch):
 
     with (
         patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
-        patch("app.telegram_bot.get_mute_ttl", new=AsyncMock(return_value=None)),
+        patch("app.telegram_bot.get_channel_mute_ttl", new=AsyncMock(return_value=None)),
         patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
     ):
         await _handle_status(AsyncMock(), 555, user)
@@ -427,7 +427,7 @@ async def test_bot_mute_validates_server_owner():
 
     with (
         patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
-        patch("app.telegram_bot.set_server_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot.set_channel_mute", new=AsyncMock()) as mute_mock,
         patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
     ):
         await _handle_mute(AsyncMock(), 555, user, "/mute 42 30")
@@ -438,7 +438,7 @@ async def test_bot_mute_validates_server_owner():
 
 
 async def test_bot_mute_happy_path():
-    """`/mute <my_server> 30` → set_server_mute(server, 30) + ack."""
+    """`/mute <my_server> 30` без указания канала → глушим оба (telegram + email)."""
     from app.telegram_bot import _handle_mute
 
     user = MagicMock(id=1)
@@ -452,12 +452,16 @@ async def test_bot_mute_happy_path():
 
     with (
         patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
-        patch("app.telegram_bot.set_server_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot.set_channel_mute", new=AsyncMock()) as mute_mock,
         patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
     ):
         await _handle_mute(AsyncMock(), 555, user, "/mute 42 30")
 
-    mute_mock.assert_awaited_once_with(42, 30)
+    assert mute_mock.await_count == 2
+    called_channels = {call.args[1] for call in mute_mock.await_args_list}
+    assert called_channels == {"telegram", "email"}
+    for call in mute_mock.await_args_list:
+        assert call.args[0] == 42 and call.args[2] == 30
     text = send_mock.call_args[0][2]
     assert "заглушен" in text
 
@@ -486,7 +490,7 @@ async def test_bot_mute_bad_format():
 
 
 def test_send_telegram_alert_skips_muted_server():
-    """is_server_muted=True → send_message не вызывается."""
+    """is_channel_muted('telegram')=True → send_message не вызывается."""
     from app.tasks.notification_tasks import send_telegram_alert
 
     event = MagicMock(metric_value=95.0, threshold_value=90.0, created_at=datetime.now(UTC))
@@ -508,7 +512,7 @@ def test_send_telegram_alert_skips_muted_server():
     with (
         patch("app.database.async_session_factory", return_value=fake_session_cm),
         patch("app.tasks.notification_tasks.Redis.from_url", return_value=fake_redis),
-        patch("app.tasks.notification_tasks.is_server_muted", new=AsyncMock(return_value=True)),
+        patch("app.tasks.notification_tasks.is_channel_muted", new=AsyncMock(return_value=True)),
         patch("app.tasks.notification_tasks.send_message", new=AsyncMock()) as send_mock,
     ):
         send_telegram_alert(event_id=1)
@@ -547,3 +551,375 @@ async def test_threshold_enqueues_notifications_on_trigger():
     assert len(events) == 1
     tg_mock.assert_called_once()
     email_mock.assert_called_once()
+
+
+# ─── Bot commands: /rules, /toggle, /delete ─────────────────────────────────
+
+
+def _session_cm_with_execute(*results):
+    """Хелпер: возвращает контекст-менеджер AsyncSession, чей execute отдаёт
+    по очереди указанные result-моки."""
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.side_effect = list(results)
+    fake_session_cm.__aenter__.return_value = fake_session
+    return fake_session_cm, fake_session
+
+
+async def test_bot_rules_empty_list():
+    """`/rules` без правил → 'нет правил'."""
+    from app.telegram_bot import _handle_rules
+
+    user = MagicMock(id=1)
+    rules_result = MagicMock()
+    rules_result.tuples.return_value.all.return_value = []
+    cm, _ = _session_cm_with_execute(rules_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_rules(AsyncMock(), 555, user)
+
+    text = send_mock.call_args[0][2]
+    assert "нет правил" in text.lower()
+
+
+async def test_bot_rules_lists_active_and_inactive():
+    """`/rules` показывает все правила с флагом активности и именем сервера."""
+    from app.models.alert_rule import ThresholdOperator
+    from app.telegram_bot import _handle_rules
+
+    user = MagicMock(id=1)
+    rule_on = MagicMock(
+        id=1,
+        is_active=True,
+        operator=ThresholdOperator.gt,
+        metric_field="cpu_percent",
+        threshold_value=90.0,
+    )
+    rule_on.name = "cpu high"
+    rule_off = MagicMock(
+        id=2,
+        is_active=False,
+        operator=ThresholdOperator.lt,
+        metric_field="memory_percent",
+        threshold_value=10.0,
+    )
+    rule_off.name = "mem low"
+
+    rules_result = MagicMock()
+    rules_result.tuples.return_value.all.return_value = [
+        (rule_on, "prod-1"),
+        (rule_off, "prod-2"),
+    ]
+    cm, _ = _session_cm_with_execute(rules_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_rules(AsyncMock(), 555, user)
+
+    text = send_mock.call_args[0][2]
+    assert "#1" in text and "cpu high" in text and "prod-1" in text
+    assert "#2" in text and "mem low" in text and "prod-2" in text
+    assert "on" in text and "off" in text
+
+
+async def test_bot_toggle_flips_is_active():
+    """`/toggle <id>` инвертирует rule.is_active и коммитит."""
+    from app.telegram_bot import _handle_toggle
+
+    user = MagicMock(id=1)
+    rule = MagicMock(id=7, is_active=True)
+    rule.name = "cpu high"
+
+    rule_result = MagicMock()
+    rule_result.scalar_one_or_none.return_value = rule
+    cm, sess = _session_cm_with_execute(rule_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_toggle(AsyncMock(), 555, user, "/toggle 7")
+
+    assert rule.is_active is False
+    sess.commit.assert_awaited_once()
+    text = send_mock.call_args[0][2]
+    assert "off" in text
+
+
+async def test_bot_toggle_rule_not_found():
+    """`/toggle <id>` чужого/несуществующего правила → отказ."""
+    from app.telegram_bot import _handle_toggle
+
+    rule_result = MagicMock()
+    rule_result.scalar_one_or_none.return_value = None
+    cm, sess = _session_cm_with_execute(rule_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_toggle(AsyncMock(), 555, MagicMock(id=1), "/toggle 99")
+
+    sess.commit.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "не найдено" in text or "не твоё" in text
+
+
+async def test_bot_toggle_bad_format():
+    """`/toggle foo` → подсказка."""
+    from app.telegram_bot import _handle_toggle
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_toggle(AsyncMock(), 555, MagicMock(id=1), "/toggle foo")
+
+    text = send_mock.call_args[0][2]
+    assert "Использование" in text
+
+
+async def test_bot_delete_first_step_sets_pending():
+    """`/delete <id>` (первый раз) → set_pending_delete, без актуального delete."""
+    from app.telegram_bot import _handle_delete
+
+    user = MagicMock(id=1)
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    server_result = MagicMock()
+    server_result.scalar_one_or_none.return_value = server
+    cm, sess = _session_cm_with_execute(server_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot.set_pending_delete", new=AsyncMock()) as pending_mock,
+        patch("app.telegram_bot.consume_pending_delete", new=AsyncMock()) as consume_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_delete(AsyncMock(), 555, user, "/delete 42")
+
+    pending_mock.assert_awaited_once_with(555, 42)
+    consume_mock.assert_not_awaited()
+    sess.delete.assert_not_called()
+    text = send_mock.call_args[0][2]
+    assert "Подтверди" in text
+    assert "/delete 42 confirm" in text
+
+
+async def test_bot_delete_confirm_happy_path():
+    """`/delete <id> confirm` после первого шага → db.delete + commit."""
+    from app.telegram_bot import _handle_delete
+
+    user = MagicMock(id=1)
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    server_result = MagicMock()
+    server_result.scalar_one_or_none.return_value = server
+    cm, sess = _session_cm_with_execute(server_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot.consume_pending_delete", new=AsyncMock(return_value=True)),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_delete(AsyncMock(), 555, user, "/delete 42 confirm")
+
+    sess.delete.assert_awaited_once_with(server)
+    sess.commit.assert_awaited_once()
+    text = send_mock.call_args[0][2]
+    assert "удалён" in text
+
+
+async def test_bot_delete_confirm_without_pending_rejected():
+    """`/delete <id> confirm` без живого pending → отказ, без delete."""
+    from app.telegram_bot import _handle_delete
+
+    user = MagicMock(id=1)
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    server_result = MagicMock()
+    server_result.scalar_one_or_none.return_value = server
+    cm, sess = _session_cm_with_execute(server_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot.consume_pending_delete", new=AsyncMock(return_value=False)),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_delete(AsyncMock(), 555, user, "/delete 42 confirm")
+
+    sess.delete.assert_not_called()
+    sess.commit.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "истекло" in text or "не совпадает" in text
+
+
+async def test_bot_delete_not_owned():
+    """`/delete <id>` чужого сервера → 'не найден или не твой', без pending."""
+    from app.telegram_bot import _handle_delete
+
+    server_result = MagicMock()
+    server_result.scalar_one_or_none.return_value = None
+    cm, _ = _session_cm_with_execute(server_result)
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=cm),
+        patch("app.telegram_bot.set_pending_delete", new=AsyncMock()) as pending_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_delete(AsyncMock(), 555, MagicMock(id=1), "/delete 42")
+
+    pending_mock.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "не найден" in text
+
+
+async def test_bot_delete_bad_format():
+    """`/delete foo` → подсказка."""
+    from app.telegram_bot import _handle_delete
+
+    with patch("app.telegram_bot._send", new=AsyncMock()) as send_mock:
+        await _handle_delete(AsyncMock(), 555, MagicMock(id=1), "/delete foo")
+
+    text = send_mock.call_args[0][2]
+    assert "Использование" in text
+
+
+# ─── Per-channel mute ───────────────────────────────────────────────────────
+
+
+async def test_bot_mute_specific_channel_telegram():
+    """`/mute X Y telegram` → один вызов set_channel_mute, только 'telegram'."""
+    from app.telegram_bot import _handle_mute
+
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=server)
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.set_channel_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_mute(AsyncMock(), 555, MagicMock(id=1), "/mute 42 30 telegram")
+
+    mute_mock.assert_awaited_once_with(42, "telegram", 30)
+    text = send_mock.call_args[0][2]
+    assert "telegram" in text
+
+
+async def test_bot_mute_specific_channel_email():
+    """`/mute X Y email` → один вызов set_channel_mute, только 'email'."""
+    from app.telegram_bot import _handle_mute
+
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.return_value.scalar_one_or_none = MagicMock(return_value=server)
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.set_channel_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()),
+    ):
+        await _handle_mute(AsyncMock(), 555, MagicMock(id=1), "/mute 42 30 email")
+
+    mute_mock.assert_awaited_once_with(42, "email", 30)
+
+
+async def test_bot_mute_invalid_channel_rejected():
+    """`/mute X Y sms` → отказ, set_channel_mute не вызывается."""
+    from app.telegram_bot import _handle_mute
+
+    with (
+        patch("app.telegram_bot.set_channel_mute", new=AsyncMock()) as mute_mock,
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_mute(AsyncMock(), 555, MagicMock(id=1), "/mute 42 30 sms")
+
+    mute_mock.assert_not_awaited()
+    text = send_mock.call_args[0][2]
+    assert "канал" in text.lower()
+
+
+async def test_bot_status_shows_per_channel_mute():
+    """`/status` показывает оба канала с TTL когда оба заглушены."""
+    from app.telegram_bot import _handle_status
+
+    user = MagicMock(id=1)
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    metric = MagicMock(cpu_percent=15.5, memory_percent=40.2, disk_percent=30.0)
+
+    servers_result = MagicMock()
+    servers_result.scalars.return_value.all.return_value = [server]
+    metric_result = MagicMock()
+    metric_result.scalar_one_or_none.return_value = metric
+    events_result = MagicMock()
+    events_result.all.return_value = []
+
+    fake_session_cm = AsyncMock()
+    fake_session = AsyncMock()
+    fake_session.execute.side_effect = [servers_result, metric_result, events_result]
+    fake_session_cm.__aenter__.return_value = fake_session
+
+    # 600s = 10 минут для обоих каналов
+    async def ttl_per_channel(server_id, channel):
+        return 600
+
+    with (
+        patch("app.telegram_bot.async_session_factory", return_value=fake_session_cm),
+        patch("app.telegram_bot.get_channel_mute_ttl", side_effect=ttl_per_channel),
+        patch("app.telegram_bot._send", new=AsyncMock()) as send_mock,
+    ):
+        await _handle_status(AsyncMock(), 555, user)
+
+    text = send_mock.call_args[0][2]
+    # бот режет channel[:2] → 'te', 'em'
+    assert "te:10m" in text
+    assert "em:10m" in text
+
+
+def test_send_email_alert_telegram_mute_does_not_block_email():
+    """Telegram-mute активен, email-mute неактивен → email отправляется."""
+    from app.tasks.notification_tasks import send_email_alert
+
+    event = MagicMock(metric_value=95.0, threshold_value=90.0, created_at=datetime.now(UTC))
+    rule = MagicMock(metric_field="cpu_percent")
+    rule.name = "high cpu"
+    rule.operator.value = "gt"
+    server = MagicMock(id=42)
+    server.name = "prod-1"
+    user = MagicMock(id=1, email="a@x", email_alerts_enabled=True)
+
+    cm = AsyncMock()
+    sess = AsyncMock()
+    sess.execute.return_value.first = MagicMock(return_value=(event, rule, server, user))
+    cm.__aenter__.return_value = sess
+
+    fake_redis = AsyncMock()
+    fake_redis.aclose = AsyncMock()
+
+    # Mute только для 'telegram', не для 'email'
+    async def mute_only_telegram(server_id, channel):
+        return channel == "telegram"
+
+    with (
+        patch("app.database.async_session_factory", return_value=cm),
+        patch("app.tasks.notification_tasks.Redis.from_url", return_value=fake_redis),
+        patch(
+            "app.tasks.notification_tasks.is_channel_muted",
+            new=AsyncMock(side_effect=mute_only_telegram),
+        ),
+        patch("app.tasks.notification_tasks.send_email", new=AsyncMock()) as send_mock,
+    ):
+        send_email_alert(event_id=1)
+
+    send_mock.assert_called_once()

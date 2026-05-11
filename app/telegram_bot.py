@@ -17,20 +17,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import async_session_factory
 from app.models.alert_event import AlertEvent
+from app.models.alert_rule import AlertRule
 from app.models.metric import Metric
 from app.models.server import Server
 from app.models.user import User
 from app.redis_client import (
+    MUTE_CHANNELS,
+    consume_pending_delete,
     consume_tg_link_code,
-    get_mute_ttl,
+    get_channel_mute_ttl,
+    set_channel_mute,
+    set_pending_delete,
     set_redis_client,
-    set_server_mute,
 )
 
 _POLL_TIMEOUT_SECONDS = 30
 _HTTP_TIMEOUT = httpx.Timeout(_POLL_TIMEOUT_SECONDS + 10, connect=10.0)
 _START_PATTERN = re.compile(r"^/start\s+(?P<code>\S+)\s*$")
-_MUTE_PATTERN = re.compile(r"^/mute\s+(?P<server_id>\d+)\s+(?P<minutes>\d+)\s*$")
+_MUTE_PATTERN = re.compile(
+    r"^/mute\s+(?P<server_id>\d+)\s+(?P<minutes>\d+)(?:\s+(?P<channel>\w+))?\s*$"
+)
+_TOGGLE_PATTERN = re.compile(r"^/toggle\s+(?P<rule_id>\d+)\s*$")
+_DELETE_PATTERN = re.compile(r"^/delete\s+(?P<server_id>\d+)(?P<confirm>\s+confirm)?\s*$")
 
 
 def _bot_url(method: str) -> str:
@@ -93,7 +101,11 @@ async def _handle_start(client: httpx.AsyncClient, chat_id: int, text: str) -> N
             client,
             chat_id,
             "✅ Аккаунт привязан. Теперь алерты будут приходить сюда.\n"
-            "Команды: /status, /servers, /mute <server_id> <minutes>",
+            "Команды:\n"
+            "  /status, /servers\n"
+            "  /mute <server_id> <minutes>\n"
+            "  /rules, /toggle <rule_id>\n"
+            "  /delete <server_id>",
         )
     else:
         await _send(client, chat_id, "❌ Юзер не найден. Возможно, аккаунт удалён.")
@@ -137,8 +149,12 @@ async def _handle_status(client: httpx.AsyncClient, chat_id: int, user: User) ->
                 if latest
                 else "нет данных"
             )
-            mute_ttl = await get_mute_ttl(server.id)
-            mute_part = f" 🔇{mute_ttl // 60}m" if mute_ttl else ""
+            mute_parts = []
+            for ch in MUTE_CHANNELS:
+                ttl = await get_channel_mute_ttl(server.id, ch)
+                if ttl:
+                    mute_parts.append(f"{ch[:2]}:{ttl // 60}m")
+            mute_part = f" 🔇{' '.join(mute_parts)}" if mute_parts else ""
             alert_part = f" 🚨{len(open_events)}" if open_events else ""
             lines.append(f"• #{server.id} {server.name}: {metric_part}{alert_part}{mute_part}")
 
@@ -172,14 +188,27 @@ async def _handle_servers(client: httpx.AsyncClient, chat_id: int, user: User) -
 async def _handle_mute(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
     match = _MUTE_PATTERN.match(text)
     if not match:
-        await _send(client, chat_id, "Использование: /mute <server_id> <minutes>")
+        await _send(
+            client,
+            chat_id,
+            "Использование: /mute <server_id> <minutes> [telegram|email|all]",
+        )
         return
 
     server_id = int(match.group("server_id"))
     minutes = int(match.group("minutes"))
+    channel_arg = (match.group("channel") or "all").lower()
 
     if minutes <= 0 or minutes > 1440:
         await _send(client, chat_id, "❌ minutes должен быть в диапазоне 1..1440")
+        return
+
+    if channel_arg not in {"all", *MUTE_CHANNELS}:
+        await _send(
+            client,
+            chat_id,
+            f"❌ Неверный канал. Допустимо: all, {', '.join(MUTE_CHANNELS)}",
+        )
         return
 
     async with async_session_factory() as db:
@@ -193,8 +222,122 @@ async def _handle_mute(client: httpx.AsyncClient, chat_id: int, user: User, text
         await _send(client, chat_id, "❌ Сервер не найден или не твой.")
         return
 
-    await set_server_mute(server_id, minutes)
-    await _send(client, chat_id, f"🔇 Сервер #{server_id} {server.name} заглушен на {minutes} мин.")
+    channels = MUTE_CHANNELS if channel_arg == "all" else (channel_arg,)
+    for ch in channels:
+        await set_channel_mute(server_id, ch, minutes)
+
+    channels_str = ", ".join(channels)
+    await _send(
+        client,
+        chat_id,
+        f"🔇 Сервер #{server_id} {server.name} заглушен на {minutes} мин ({channels_str}).",
+    )
+
+
+# ─── Команда /rules — список правил юзера ───────────────────────────────────
+
+
+async def _handle_rules(client: httpx.AsyncClient, chat_id: int, user: User) -> None:
+    async with async_session_factory() as db:
+        rules = (
+            (
+                await db.execute(
+                    select(AlertRule, Server.name)
+                    .join(Server, Server.id == AlertRule.server_id)
+                    .where(AlertRule.owner_id == user.id)
+                    .order_by(AlertRule.id)
+                )
+            )
+            .tuples()
+            .all()
+        )
+
+    if not rules:
+        await _send(client, chat_id, "У тебя нет правил.")
+        return
+
+    lines = [f"📐 Правила ({len(rules)}):"]
+    for rule, server_name in rules:
+        state = "✅on" if rule.is_active else "⏸off"
+        op = rule.operator.value
+        lines.append(
+            f"• #{rule.id} {state} [{server_name}] {rule.name}: "
+            f"{rule.metric_field} {op} {rule.threshold_value}"
+        )
+    await _send(client, chat_id, "\n".join(lines))
+
+
+# ─── Команда /toggle <rule_id> — флип is_active ─────────────────────────────
+
+
+async def _handle_toggle(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
+    match = _TOGGLE_PATTERN.match(text)
+    if not match:
+        await _send(client, chat_id, "Использование: /toggle <rule_id>")
+        return
+
+    rule_id = int(match.group("rule_id"))
+    async with async_session_factory() as db:
+        rule = (
+            await db.execute(
+                select(AlertRule).where(AlertRule.id == rule_id, AlertRule.owner_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if rule is None:
+            await _send(client, chat_id, "❌ Правило не найдено или не твоё.")
+            return
+
+        rule.is_active = not rule.is_active
+        await db.commit()
+        new_state = "✅on" if rule.is_active else "⏸off"
+        await _send(client, chat_id, f"Правило #{rule.id} «{rule.name}» теперь {new_state}")
+
+
+# ─── Команда /delete <server_id> [confirm] — двухступенчатое удаление ───────
+
+
+async def _handle_delete(client: httpx.AsyncClient, chat_id: int, user: User, text: str) -> None:
+    match = _DELETE_PATTERN.match(text)
+    if not match:
+        await _send(client, chat_id, "Использование: /delete <server_id>")
+        return
+
+    server_id = int(match.group("server_id"))
+    is_confirm = match.group("confirm") is not None
+
+    async with async_session_factory() as db:
+        server = (
+            await db.execute(
+                select(Server).where(Server.id == server_id, Server.owner_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if server is None:
+            await _send(client, chat_id, "❌ Сервер не найден или не твой.")
+            return
+
+        if not is_confirm:
+            await set_pending_delete(chat_id, server_id)
+            await _send(
+                client,
+                chat_id,
+                f"⚠️ Удалить сервер #{server.id} «{server.name}»?\n"
+                f"Это снесёт все его метрики, агрегаты, правила и события — необратимо.\n"
+                f"Подтверди в течение 60с: /delete {server.id} confirm",
+            )
+            return
+
+        if not await consume_pending_delete(chat_id, server_id):
+            await _send(
+                client,
+                chat_id,
+                "❌ Подтверждение истекло или не совпадает. Начни заново: /delete <id>",
+            )
+            return
+
+        server_name = server.name
+        await db.delete(server)
+        await db.commit()
+        await _send(client, chat_id, f"🗑 Сервер #{server_id} «{server_name}» удалён.")
 
 
 # ─── Главный диспетчер ──────────────────────────────────────────────────────
@@ -233,11 +376,21 @@ async def _handle_message(client: httpx.AsyncClient, message: dict) -> None:
         await _handle_servers(client, chat_id, user)
     elif text.startswith("/mute"):
         await _handle_mute(client, chat_id, user, text)
+    elif text.startswith("/rules"):
+        await _handle_rules(client, chat_id, user)
+    elif text.startswith("/toggle"):
+        await _handle_toggle(client, chat_id, user, text)
+    elif text.startswith("/delete"):
+        await _handle_delete(client, chat_id, user, text)
     else:
         await _send(
             client,
             chat_id,
-            "Неизвестная команда. Доступные: /status, /servers, /mute <server_id> <minutes>",
+            "Неизвестная команда. Доступные:\n"
+            "  /status, /servers\n"
+            "  /mute <server_id> <minutes>\n"
+            "  /rules, /toggle <rule_id>\n"
+            "  /delete <server_id>",
         )
 
 

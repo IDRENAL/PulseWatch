@@ -12,7 +12,7 @@ from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule
 from app.models.server import Server
 from app.models.user import User
-from app.redis_client import is_server_muted, set_redis_client
+from app.redis_client import is_channel_muted, set_redis_client
 from app.services.email_alert import (
     EmailNotConfiguredError,
     EmailSendError,
@@ -75,9 +75,9 @@ async def _send(event_id: int) -> None:
             )
             return
 
-        if await is_server_muted(server.id):
+        if await is_channel_muted(server.id, "telegram"):
             logger.info(
-                "send_telegram_alert: server id={} muted, skipping event id={}",
+                "send_telegram_alert: server id={} telegram-muted, skipping event id={}",
                 server.id,
                 event_id,
             )
@@ -159,9 +159,9 @@ async def _send_email(event_id: int) -> None:
             )
             return
 
-        if await is_server_muted(server.id):
+        if await is_channel_muted(server.id, "email"):
             logger.info(
-                "send_email_alert: server id={} muted, skipping event id={}",
+                "send_email_alert: server id={} email-muted, skipping event id={}",
                 server.id,
                 event_id,
             )

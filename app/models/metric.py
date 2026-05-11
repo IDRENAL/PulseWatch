@@ -10,7 +10,7 @@ class Metric(Base):
     __tablename__ = "metrics"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id"))
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     cpu_percent: Mapped[float]
     memory_percent: Mapped[float]
     disk_percent: Mapped[float]

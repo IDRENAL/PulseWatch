@@ -1,8 +1,8 @@
 # PulseWatch
 
-Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и отдаёт реал-тайм поток через WebSocket.
+Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и email, отдаёт реал-тайм поток через WebSocket, а HTTP-метрики бэкенда отдаёт в Prometheus-формате для Grafana.
 
-Учебный проект, реализующий 7-этапный план разработки. Текущее состояние: этапы 1–7 закрыты, в TODO остаются frontend-дашборд и привязка Telegram через `/start`-бот.
+Учебный проект, реализующий 7-этапный план разработки + хвостовые фичи поверх (telegram-бот с командами админки, email-канал, auto-resolve, per-channel mute, Prometheus/Grafana). В TODO остаётся только frontend-дашборд.
 
 ## Архитектура
 
@@ -29,9 +29,10 @@ Self-hosted система мониторинга серверов: агенты
 - **Агент** — Python-процесс на наблюдаемом сервере. `psutil` для системных метрик, Docker SDK для контейнеров, journalctl для логов. Шлёт раз в 10 секунд через `httpx`.
 - **Backend (FastAPI)** — приём метрик, JWT-аутентификация юзеров, API-ключи для агентов, REST + WebSocket эндпоинты.
 - **Postgres** — хранит юзеров (с настройками уведомлений: Telegram chat_id + флаг email_alerts_enabled), серверы, raw-метрики (24ч), агрегаты (`metric_aggregates`, `docker_aggregates`), алерт-правила и события.
-- **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), Celery broker (db=1) и backend (db=2).
-- **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов, отправка уведомлений в Telegram и email.
-- **Telegram bot** — отдельный long-polling процесс, обрабатывает `/start <код>` для привязки чата к юзеру. Одноразовые коды живут в Redis с TTL 10 мин.
+- **Redis** — Pub/Sub для real-time дашборда, кэш дашборда (10s TTL), хранилище rate-лимитов (db=3), per-channel mute (`mute:<server_id>:<channel>`), pending-delete подтверждения, одноразовые коды привязки бота, Celery broker (db=1) и backend (db=2).
+- **Celery + Beat** — 5-минутная/почасовая/посуточная агрегация, heartbeat-проверка (помечает сервер неактивным, если метрик нет >5 мин), auto-resolve алертов (system + docker), отправка уведомлений в Telegram и email.
+- **Telegram bot** — отдельный long-polling процесс. Обрабатывает `/start <код>` для привязки чата к юзеру (одноразовые коды живут в Redis с TTL 10 мин) и команды админки: `/status`, `/servers`, `/rules`, `/toggle`, `/mute`, `/delete`.
+- **Prometheus + Grafana** *(опционально)* — Prometheus скрапит `/metrics/prometheus` на бэкенде каждые 15с (счётчики запросов, латентность, статусы). Grafana с pre-provisioned Prometheus-датасорсом ждёт твои дашборды.
 
 ## Стек
 
@@ -98,6 +99,7 @@ curl -X POST http://localhost:8000/servers/register \
 | `TELEGRAM_BOT_TOKEN` | Токен бота от `@BotFather`. Опционально — если пусто, уведомления отключены |
 | `TELEGRAM_BOT_USERNAME` | Username бота (без `@`). Нужен только для deep-link в `/auth/me/telegram/code` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_USE_TLS` | SMTP для email-уведомлений. Пусто → канал выключен |
+| `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` | Логин/пароль админа Grafana. По умолчанию `admin`/`admin` (поменяй) |
 | `AGENT_API_URL` | URL бэкенда для агента |
 | `AGENT_API_KEY` | API-ключ от `/servers/register`, формат `<server_id>.<secret>` |
 | `AGENT_SEND_INTERVAL_SECONDS` | Период отправки метрик (по умолчанию 10с) |
@@ -135,7 +137,7 @@ curl -X POST http://localhost:8000/servers/register \
 - `POST/GET/PATCH/DELETE /alerts/rules` — CRUD правил порогов.
 - `GET /alerts/events` — история срабатываний (с полем `resolved_at`).
 - При срабатывании: задача в Celery шлёт сообщение в Telegram (если у юзера привязан chat_id и токен бота настроен), плюс публикация в Redis Pub/Sub.
-- Auto-resolve: раз в минуту Celery-beat проверяет открытые системные события — если последняя метрика больше не пробивает порог, в `resolved_at` ставится текущее время.
+- Auto-resolve: раз в минуту Celery-beat проверяет открытые события — если последняя метрика больше не пробивает порог, в `resolved_at` ставится текущее время. Работает и для system, и для docker (по `(server_id, container_name)`).
 
 ### WebSocket
 - `WS /ws/metrics/{server_id}?token=<JWT>` — real-time поток метрик владельцу сервера.
@@ -155,7 +157,7 @@ curl -X POST http://localhost:8000/servers/register \
 
 ## Уведомления
 
-При срабатывании алерт-правила событие шлётся в **два канала параллельно**: Telegram (если у юзера привязан `telegram_chat_id` и токен бота настроен) и email (если SMTP сконфигурирован и у юзера `email_alerts_enabled=true`). Оба канала уважают **один общий mute** (Redis-ключ `mute:<server_id>`, ставится через бот-команду `/mute`).
+При срабатывании алерт-правила событие шлётся в **два канала параллельно**: Telegram (если у юзера привязан `telegram_chat_id` и токен бота настроен) и email (если SMTP сконфигурирован и у юзера `email_alerts_enabled=true`). Каналы можно глушить **независимо**: Redis-ключи `mute:<server_id>:telegram` и `mute:<server_id>:email` живут с TTL и ставятся через бот-команду `/mute`. По умолчанию `/mute <id> <minutes>` (без указания канала) глушит оба.
 
 ### Telegram
 
@@ -202,11 +204,14 @@ curl -X PATCH http://localhost:8000/auth/me/telegram \
 
 | Команда | Что делает |
 |---|---|
-| `/status` | Сводка: список серверов с последней метрикой (CPU/RAM/disk), счётчик открытых алертов, индикатор mute |
+| `/status` | Сводка: список серверов с последней метрикой (CPU/RAM/disk), счётчик открытых алертов, индикатор mute по каналам |
 | `/servers` | Подробный список серверов: имя, `last_seen_at`, активность |
-| `/mute <server_id> <minutes>` | Глушит уведомления для сервера на N минут (1–1440). Хранится в Redis с TTL |
+| `/mute <server_id> <minutes> [telegram\|email\|all]` | Глушит уведомления для сервера на N минут (1–1440). Канал опционален, default `all` (оба) |
+| `/rules` | Список твоих алерт-правил с состоянием on/off, оператором и порогом |
+| `/toggle <rule_id>` | Включает/выключает правило (флипает `is_active`) |
+| `/delete <server_id>` | **Двухступенчатое** удаление сервера со всеми его метриками/агрегатами/правилами/событиями. Бот просит подтверждение `/delete <id> confirm` в течение 60с |
 
-Mute проверяется в `send_telegram_alert` и `send_email_alert` перед отправкой — пока активна заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `GET /alerts/events`.
+Mute проверяется в `send_telegram_alert` и `send_email_alert` перед отправкой (каждый смотрит свой канал) — пока активна заглушка, сообщения молча скипаются. Алерт-события всё равно создаются и видны в `GET /alerts/events`.
 
 ### Email
 
@@ -232,6 +237,20 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 ```
 
 Если `SMTP_HOST` не задан — канал молча выключен, никаких ошибок.
+
+## Observability (Prometheus + Grafana)
+
+Бэкенд отдаёт HTTP-метрики в Prometheus-формате на `/metrics/prometheus` (счётчики запросов, латентность, статус-коды — собираются через middleware `prometheus-fastapi-instrumentator`). В compose уже есть два готовых сервиса:
+
+- **`prometheus`** на `http://localhost:9090` — скрапит `app:8000/metrics/prometheus` раз в 15с. Конфиг в `prometheus.yml`.
+- **`grafana`** на `http://localhost:3000` — с pre-provisioned Prometheus-датасорсом. Дефолтные креды `admin`/`admin` (поменяй через `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` в `.env`).
+
+После `make up`:
+1. Открой Grafana → авторизуйся.
+2. **Connections → Data sources** — Prometheus уже подключён, проверь «Test».
+3. **Dashboards → New** — собирай графики из метрик типа `http_requests_total{job="pulsewatch"}`, `http_request_duration_seconds_bucket`, etc.
+
+Первый запрос на `/metrics/prometheus` идёт через 15с после старта Prometheus, так что сразу после `up` метрик может ещё не быть — подожди минуту.
 
 ## Установка агента на наблюдаемый сервер
 
@@ -316,10 +335,10 @@ docs/         # планы этапов
 
 ## Известные ограничения / TODO
 
-- Auto-resolve работает только для системных алертов. Docker-резолв не реализован — у `AlertEvent` нет колонки `container_name`, чтобы понять метрики какого контейнера перепроверять.
 - Frontend для дашборда отсутствует — WebSocket-потоки можно посмотреть только через клиент или devtools.
-- Telegram-бот команд для админки сервера пока нет (например, удаления сервера, переключения активности правила). Текущий набор: `/start`, `/status`, `/servers`, `/mute`.
-- Per-канальный mute не поддерживается — `/mute` глушит и Telegram, и email одновременно.
+- Refresh-токены не реализованы — access-token живёт `ACCESS_TOKEN_EXPIRE_MINUTES`, после истечения юзер логинится заново.
+- Pre-built Grafana дашборды не поставляются — есть только datasource. Добавь свои в `grafana/provisioning/dashboards/`.
+- Alertmanager не подключён — Prometheus-метрики только наблюдаемы, на их основе алертов нет (наши алерты живут отдельно в Postgres + Celery).
 
 ## Лицензия
 
