@@ -13,6 +13,7 @@ from app.models.server import Server
 from app.models.user import User
 from app.schemas.alert_event import AlertEventRead
 from app.schemas.alert_rule import AlertRuleCreate, AlertRuleRead, AlertRuleUpdate
+from app.services.audit import record_audit
 from app.utils.csv_export import stream_csv
 
 router = APIRouter()
@@ -51,6 +52,13 @@ async def create_alert_rule(
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
+    await record_audit(
+        db,
+        action="rule_create",
+        user_id=current_user.id,
+        resource_type="rule",
+        resource_id=rule.id,
+    )
     return rule
 
 
@@ -108,6 +116,14 @@ async def update_alert_rule(
 
     await db.commit()
     await db.refresh(rule)
+    await record_audit(
+        db,
+        action="rule_update",
+        user_id=current_user.id,
+        resource_type="rule",
+        resource_id=rule.id,
+        meta={"fields": list(update_data.keys())},
+    )
     return rule
 
 
@@ -125,8 +141,16 @@ async def delete_alert_rule(
     ).scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
+    rule_id_audit = rule.id
     await db.delete(rule)
     await db.commit()
+    await record_audit(
+        db,
+        action="rule_delete",
+        user_id=current_user.id,
+        resource_type="rule",
+        resource_id=rule_id_audit,
+    )
 
 
 # 6. GET /alerts/events — список событий (с фильтрами по server_id, rule_id)

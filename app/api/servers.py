@@ -102,6 +102,16 @@ async def rotate_api_key(
     await db.commit()
     await db.refresh(server)
 
+    from app.services.audit import record_audit
+
+    await record_audit(
+        db,
+        action="server_rotate_key",
+        user_id=current_user.id,
+        resource_type="server",
+        resource_id=server.id,
+    )
+
     return ServerWithKey(
         id=server.id,
         name=server.name,

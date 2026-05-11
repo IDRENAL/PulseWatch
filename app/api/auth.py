@@ -41,6 +41,7 @@ from app.schemas.user import (
     UserCreate,
     UserRead,
 )
+from app.services.audit import record_audit
 
 _REFRESH_TTL_SECONDS = settings.refresh_token_expire_days * 24 * 60 * 60
 
@@ -78,6 +79,8 @@ async def register_user(request: Request, data: UserCreate, db: AsyncSession = D
         ) from None
     await db.refresh(new_user)
 
+    await record_audit(db, action="register", user_id=new_user.id, request=request)
+
     # 4. Возвращаем созданного юзера
     return new_user
 
@@ -97,6 +100,13 @@ async def login(
 
     # ШАГ 2: проверить пароль и наличие юзера
     if user is None or not verify_password(form_data.password, user.password_hash):
+        await record_audit(
+            db,
+            action="login_failed",
+            user_id=user.id if user else None,
+            request=request,
+            meta={"email": form_data.username},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -110,6 +120,13 @@ async def login(
                 detail="TOTP_REQUIRED",
             )
         if not pyotp.TOTP(user.totp_secret).verify(totp_code, valid_window=1):
+            await record_audit(
+                db,
+                action="login_failed",
+                user_id=user.id,
+                request=request,
+                meta={"reason": "invalid_totp"},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid TOTP code",
@@ -119,6 +136,7 @@ async def login(
     access = create_access_token(subject=user.id)
     refresh, jti = create_refresh_token(subject=user.id)
     await store_refresh_jti(user.id, jti, _REFRESH_TTL_SECONDS)
+    await record_audit(db, action="login", user_id=user.id, request=request)
 
     return Token(access_token=access, refresh_token=refresh, token_type="bearer")
 
@@ -270,6 +288,7 @@ async def reset_password(
 
     # Отзываем все refresh-токены — пользователь должен заново залогиниться везде
     await revoke_all_refresh_for_user(user_id)
+    await record_audit(db, action="password_reset", user_id=user_id, request=request)
     return {"status": "ok"}
 
 
