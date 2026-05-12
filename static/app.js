@@ -20,6 +20,9 @@ const I18N = {
         "login.email": "Email",
         "login.password": "Пароль",
         "login.submit": "Войти",
+        "login.forgot": "Забыли пароль?",
+        "login.forgot.prompt": "Введи email — пришлём ссылку для сброса пароля",
+        "login.forgot.sent": "Если такой email зарегистрирован, ссылка для сброса отправлена.",
         "rules.title": "Алерт-правила",
         "rules.create": "Создать правило",
         "rules.submit": "Создать",
@@ -59,6 +62,9 @@ const I18N = {
         "login.email": "Email",
         "login.password": "Password",
         "login.submit": "Sign in",
+        "login.forgot": "Forgot password?",
+        "login.forgot.prompt": "Enter your email — we'll send a reset link",
+        "login.forgot.sent": "If this email is registered, a reset link has been sent.",
         "rules.title": "Alert rules",
         "rules.create": "Create rule",
         "rules.submit": "Create",
@@ -861,6 +867,25 @@ async function init() {
     });
 
     document.getElementById("logout-btn").addEventListener("click", logout);
+
+    // «Забыли пароль?» — prompt email, POST /auth/forgot-password
+    document.getElementById("forgot-password-link").addEventListener("click", async (e) => {
+        e.preventDefault();
+        const email = prompt(t("login.forgot.prompt"));
+        if (!email) return;
+        try {
+            await fetch("/auth/forgot-password", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({email}),
+            });
+        } catch (err) {
+            // 200 даже при unknown email — нет смысла раскрывать ошибки сети тут
+        }
+        const info = document.getElementById("login-info");
+        info.textContent = t("login.forgot.sent");
+        info.hidden = false;
+    });
 
     // Tabs
     document.querySelectorAll(".tab").forEach((btn) => {

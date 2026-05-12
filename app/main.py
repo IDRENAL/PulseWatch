@@ -76,3 +76,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/", include_in_schema=False)
 async def root():
     return FileResponse("static/index.html")
+
+
+@app.get("/reset-password", include_in_schema=False)
+async def reset_password_page():
+    """Страница для сценария «забыл пароль» — JS читает ?token=... из URL."""
+    return FileResponse("static/reset-password.html")
