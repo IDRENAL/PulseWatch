@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.quotas import enforce_server_quota
 from app.core.security import hash_password
 from app.database import get_db
 from app.models.docker_aggregate import DockerAggregate
@@ -38,7 +37,6 @@ async def register_server(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await enforce_server_quota(db, current_user)
     secret = secrets.token_urlsafe(32)
 
     new_server = Server(

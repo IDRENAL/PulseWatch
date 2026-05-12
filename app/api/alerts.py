@@ -6,7 +6,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.quotas import enforce_rule_quota
 from app.database import get_db
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule
@@ -38,7 +37,6 @@ async def create_alert_rule(
     db: AsyncSession = Depends(get_db),
 ):
     await _verify_server_owner(data.server_id, current_user, db)
-    await enforce_rule_quota(db, current_user)
     rule = AlertRule(
         server_id=data.server_id,
         owner_id=current_user.id,

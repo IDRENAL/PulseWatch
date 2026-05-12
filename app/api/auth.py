@@ -33,7 +33,6 @@ from app.redis_client import (
 from app.schemas.token import ForgotPasswordRequest, RefreshRequest, ResetPasswordRequest, Token
 from app.schemas.user import (
     EmailAlertsToggle,
-    QuotaUsage,
     TelegramLink,
     TelegramLinkCode,
     TotpDisableRequest,
@@ -308,37 +307,6 @@ async def logout(data: RefreshRequest):
 @router.get("/me", response_model=UserRead)
 async def read_me(current_user: User = Depends(get_current_user)):
     return current_user
-
-
-@router.get("/me/quota", response_model=QuotaUsage)
-async def read_quota(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Текущее потребление и лимит тарифа — для UI «осталось X из Y серверов»."""
-    from sqlalchemy import func
-
-    from app.core.quotas import get_limits
-    from app.models.alert_rule import AlertRule
-    from app.models.server import Server
-
-    limits = get_limits(current_user.subscription_tier)
-    servers_used = await db.scalar(
-        select(func.count()).select_from(Server).where(Server.owner_id == current_user.id)
-    )
-    rules_used = await db.scalar(
-        select(func.count())
-        .select_from(AlertRule)
-        .join(Server, AlertRule.server_id == Server.id)
-        .where(Server.owner_id == current_user.id)
-    )
-    return QuotaUsage(
-        tier=current_user.subscription_tier,
-        servers_used=servers_used or 0,
-        servers_max=limits.max_servers,
-        rules_used=rules_used or 0,
-        rules_max=limits.max_rules,
-    )
 
 
 @router.patch("/me/telegram", response_model=UserRead)
