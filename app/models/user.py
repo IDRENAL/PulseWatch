@@ -24,3 +24,8 @@ class User(Base):
     totp_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Тариф для лимитов на серверы/правила. Значения: free | pro | enterprise.
+    # Хранится строкой, а не enum, чтобы добавлять новые планы без миграции.
+    subscription_tier: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="free", server_default="free"
+    )

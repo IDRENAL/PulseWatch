@@ -16,8 +16,19 @@ class UserRead(BaseModel):
     telegram_chat_id: str | None = None
     email_alerts_enabled: bool = True
     totp_enabled: bool = False
+    subscription_tier: str = "free"
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class QuotaUsage(BaseModel):
+    """Текущее использование и лимиты тарифа. -1 в *_max = безлимит."""
+
+    tier: str
+    servers_used: int
+    servers_max: int
+    rules_used: int
+    rules_max: int
 
 
 class EmailAlertsToggle(BaseModel):
