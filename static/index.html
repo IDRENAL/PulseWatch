@@ -42,6 +42,7 @@
         <button class="tab" data-tab="events" data-i18n="tab.events">События</button>
         <button class="tab" data-tab="aggregates" data-i18n="tab.aggregates">Агрегаты</button>
         <button class="tab" data-tab="logs" data-i18n="tab.logs">Логи</button>
+        <button class="tab" data-tab="audit" data-i18n="tab.audit">История</button>
     </nav>
 
     <main id="app">
@@ -184,6 +185,21 @@
                 <button id="logs-clear" data-i18n="logs.clear">Очистить</button>
             </div>
             <pre id="logs-stream"></pre>
+        </section>
+
+        <!-- Audit tab -->
+        <section class="tab-view" id="view-audit" hidden>
+            <h2 data-i18n="audit.title">История действий</h2>
+            <div class="filter-bar">
+                <label>
+                    <span data-i18n="audit.filter.action">Действие:</span>
+                    <select id="audit-action-filter">
+                        <option value="" data-i18n="filter.all">все</option>
+                    </select>
+                </label>
+                <button id="audit-refresh" data-i18n="refresh">Обновить</button>
+            </div>
+            <div id="audit-table-wrap"></div>
         </section>
     </main>
 
