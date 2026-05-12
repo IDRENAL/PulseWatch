@@ -1,4 +1,4 @@
-.PHONY: help up down logs shell migrate test test-e2e agent flower demo backup restore
+.PHONY: help up down logs shell migrate test test-e2e agent flower demo backup restore sdk
 
 help:  ## показать все доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -43,6 +43,18 @@ backup:  ## дамп Postgres в backups/<timestamp>.sql.gz (gzip — эконо
 	docker compose exec -T db pg_dump -U $${DB_USER:-$$(grep ^DB_USER .env | cut -d= -f2)} -d $${DB_NAME:-pulsewatch} \
 		| gzip > backups/pulsewatch_$$TIMESTAMP.sql.gz; \
 	echo "✅ backup → backups/pulsewatch_$$TIMESTAMP.sql.gz"
+
+sdk:  ## сгенерировать Python SDK из живого /openapi.json (нужен запущенный бэкенд)
+	@command -v uvx >/dev/null || (echo "❌ uvx не найден; поставь uv >= 0.4"; exit 1)
+	@echo "→ Жду /openapi.json на :8000..."
+	@curl -fsS http://localhost:8000/openapi.json > /dev/null || (echo "❌ бэкенд не отвечает; сделай 'make up'"; exit 1)
+	@rm -rf sdk/pulsewatch_client
+	uvx openapi-python-client@latest generate \
+		--url http://localhost:8000/openapi.json \
+		--output-path sdk/pulsewatch_client \
+		--overwrite \
+		--meta none
+	@echo "✅ SDK → sdk/pulsewatch_client/  (попробуй: python examples/use_sdk.py)"
 
 restore:  ## восстановить из дампа: `make restore FILE=backups/...sql.gz`
 	@test -n "$(FILE)" || (echo "❌ укажи FILE=<путь к .sql или .sql.gz>"; exit 1)
