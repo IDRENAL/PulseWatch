@@ -254,6 +254,11 @@ function clearTokens() {
 
 // ─── HTTP-обёртка с авто-refresh ────────────────────────────────────────────
 
+// Эндпоинты, которые пишут запись в audit_log на бэкенде. Маршруты с числами
+// внутри пути матчим через regex. Используется в apiFetch для auto-invalidation
+// audit-таба после успешной мутации.
+const AUDIT_TRIGGER_RE = /\/(alerts\/rules|auth\/me\/totp|auth\/reset-password|servers\/\d+\/rotate-key)/;
+
 async function apiFetch(url, options = {}) {
     const tokens = getTokens();
     const headers = {...(options.headers || {})};
@@ -272,6 +277,13 @@ async function apiFetch(url, options = {}) {
             clearTokens();
             renderLogin();
         }
+    }
+
+    // После успешной мутации на audited-эндпоинте сбрасываем кеш истории,
+    // чтобы при следующем открытии вкладки «История» юзер увидел свежий список.
+    const method = (options.method || "GET").toUpperCase();
+    if (method !== "GET" && response.ok && AUDIT_TRIGGER_RE.test(url)) {
+        invalidateAudit();
     }
 
     return response;
@@ -993,8 +1005,17 @@ async function disableTotp() {
 // ─── Audit tab ──────────────────────────────────────────────────────────────
 
 let auditCache = [];  // последний загруженный список — фильтруем клиент-сайд
+let auditCacheStale = false;
+
+function invalidateAudit() {
+    auditCacheStale = true;
+    // Если вкладка прямо сейчас открыта — обновляем сразу,
+    // иначе перезагрузка случится при следующем открытии
+    if (currentTab === "audit") loadAuditTab();
+}
 
 async function loadAuditTab() {
+    auditCacheStale = false;
     const wrap = document.getElementById("audit-table-wrap");
     wrap.innerHTML = `<p class="empty">${t("loading")}</p>`;
     auditCache = await fetchAuditLog(200);

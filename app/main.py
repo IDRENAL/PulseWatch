@@ -58,7 +58,9 @@ REST_ROUTERS = [
 
 for router, prefix, tag in REST_ROUTERS:
     app.include_router(router, prefix=f"/v1{prefix}", tags=[tag])
-    app.include_router(router, prefix=prefix, tags=[f"{tag} (legacy)"])
+    # Legacy: те же роуты без /v1, но помечены deprecated — Swagger покажет
+    # перечёркнутый бейдж, клиенты получат предупреждение в auto-генерируемых SDK
+    app.include_router(router, prefix=prefix, tags=[f"{tag} (legacy)"], deprecated=True)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi stub typing
