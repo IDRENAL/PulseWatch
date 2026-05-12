@@ -41,15 +41,28 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PulseWatch", lifespan=lifespan)
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(servers_router, prefix="/servers", tags=["servers"])
-app.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
-app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
-app.include_router(docker_metrics_router, prefix="/docker-metrics", tags=["docker-metrics"])
-app.include_router(alertmanager_router, prefix="/alertmanager", tags=["alertmanager"])
-app.include_router(audit_router, prefix="/audit", tags=["audit"])
+
+# REST-роутеры монтируются ДВАЖДЫ: под /v1/... и под legacy-префиксом.
+# Старые клиенты (CI, агент, существующий фронт) работают без миграции,
+# новые клиенты могут переходить на /v1/. В следующей мажорной версии
+# legacy будет помечен deprecated и удалён.
+REST_ROUTERS = [
+    (auth_router, "/auth", "auth"),
+    (servers_router, "/servers", "servers"),
+    (alerts_router, "/alerts", "alerts"),
+    (metrics_router, "/metrics", "metrics"),
+    (docker_metrics_router, "/docker-metrics", "docker-metrics"),
+    (alertmanager_router, "/alertmanager", "alertmanager"),
+    (audit_router, "/audit", "audit"),
+]
+
+for router, prefix, tag in REST_ROUTERS:
+    app.include_router(router, prefix=f"/v1{prefix}", tags=[tag])
+    app.include_router(router, prefix=prefix, tags=[f"{tag} (legacy)"])
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi stub typing
+# WebSocket-роутеры не версионируем — пути с фиксированным /ws/ префиксом
 app.include_router(websocket_router, tags=["websocket"])
 app.include_router(ws_metrics_router, tags=["ws-metrics"])
 
