@@ -68,6 +68,25 @@ const I18N = {
         "logs.clear": "Очистить",
         "theme.dark": "Тёмная",
         "theme.light": "Светлая",
+        "loading": "Загрузка…",
+        "servers.empty": "У тебя нет зарегистрированных серверов. Зарегистрируй через POST /servers/register.",
+        "servers.never": "ни разу",
+        "servers.last_seen": "last seen:",
+        "servers.agent": "agent:",
+        "servers.status.active": "✅ active",
+        "servers.status.inactive": "⏸ inactive",
+        "servers.realtime": "реал-тайм",
+        "rules.empty": "У тебя нет правил. Создавай через POST /alerts/rules.",
+        "rules.action.off": "выкл",
+        "rules.action.on": "вкл",
+        "rules.action.del": "удалить",
+        "rules.confirm.delete": "Удалить правило #",
+        "events.empty": "Событий не найдено.",
+        "events.status.open": "открыто",
+        "events.status.resolved": "закрыто",
+        "events.threshold": "порог",
+        "error.prefix": "Ошибка",
+        "login.error.fallback": "Ошибка входа",
     },
     en: {
         "logout": "Logout",
@@ -131,6 +150,25 @@ const I18N = {
         "logs.clear": "Clear",
         "theme.dark": "Dark",
         "theme.light": "Light",
+        "loading": "Loading…",
+        "servers.empty": "You have no registered servers. Register via POST /servers/register.",
+        "servers.never": "never",
+        "servers.last_seen": "last seen:",
+        "servers.agent": "agent:",
+        "servers.status.active": "✅ active",
+        "servers.status.inactive": "⏸ inactive",
+        "servers.realtime": "real-time",
+        "rules.empty": "You have no rules. Create one via POST /alerts/rules.",
+        "rules.action.off": "off",
+        "rules.action.on": "on",
+        "rules.action.del": "del",
+        "rules.confirm.delete": "Delete rule #",
+        "events.empty": "No events found.",
+        "events.status.open": "open",
+        "events.status.resolved": "resolved",
+        "events.threshold": "threshold",
+        "error.prefix": "Error",
+        "login.error.fallback": "Login error",
     },
 };
 
@@ -269,7 +307,7 @@ async function login(email, password, totpCode = null) {
         const detail = await response.json().catch(() => ({}));
         // Сервер шлёт detail="TOTP_REQUIRED" когда нужен второй фактор —
         // прокидываем как есть, чтобы UI показал поле для кода
-        throw new Error(detail.detail || `Ошибка входа (${response.status})`);
+        throw new Error(detail.detail || `${t("login.error.fallback")} (${response.status})`);
     }
 
     const tokens = await response.json();
@@ -412,7 +450,7 @@ function renderServers(servers) {
     if (servers.length === 0) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "У тебя нет зарегистрированных серверов. Зарегистрируй через POST /servers/register.";
+        empty.textContent = t("servers.empty");
         container.appendChild(empty);
         return;
     }
@@ -429,9 +467,9 @@ function serverCard(server) {
 
     const lastSeen = server.last_seen_at
         ? new Date(server.last_seen_at).toLocaleString()
-        : "ни разу";
+        : t("servers.never");
     const statusClass = server.is_active ? "status-active" : "status-inactive";
-    const statusText = server.is_active ? "✅ active" : "⏸ inactive";
+    const statusText = server.is_active ? t("servers.status.active") : t("servers.status.inactive");
     const version = server.agent_version ?? "—";
 
     card.innerHTML = `
@@ -441,8 +479,8 @@ function serverCard(server) {
         </div>
         <div class="server-meta">
             <div class="${statusClass}">${statusText}</div>
-            <div>last seen: ${escapeHtml(lastSeen)}</div>
-            <div>agent: ${escapeHtml(version)}</div>
+            <div>${t("servers.last_seen")} ${escapeHtml(lastSeen)}</div>
+            <div>${t("servers.agent")} ${escapeHtml(version)}</div>
         </div>
     `;
 
@@ -459,7 +497,7 @@ async function selectServer(server) {
 
     document.getElementById("detail-panel").hidden = false;
     document.getElementById("detail-title").textContent =
-        `${server.name} (#${server.id}) — реал-тайм`;
+        `${server.name} (#${server.id}) — ${t("servers.realtime")}`;
 
     const metrics = await fetchMetrics(server.id, MAX_POINTS);
     metrics.reverse();
@@ -624,7 +662,7 @@ async function submitRuleForm(e) {
     const response = await createRule(payload);
     if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        errorEl.textContent = `Ошибка ${response.status}: ${JSON.stringify(detail.detail || detail)}`;
+        errorEl.textContent = `${t("error.prefix")} ${response.status}: ${JSON.stringify(detail.detail || detail)}`;
         errorEl.hidden = false;
         return;
     }
@@ -637,11 +675,11 @@ async function submitRuleForm(e) {
 async function loadRulesTab() {
     initRuleFormSelectors();
     const wrap = document.getElementById("rules-table-wrap");
-    wrap.innerHTML = '<p class="empty">Загрузка…</p>';
+    wrap.innerHTML = `<p class="empty">${t("loading")}</p>`;
 
     const rules = await fetchRules();
     if (rules.length === 0) {
-        wrap.innerHTML = '<p class="empty">У тебя нет правил. Создавай через POST /alerts/rules.</p>';
+        wrap.innerHTML = `<p class="empty">${t("rules.empty")}</p>`;
         return;
     }
 
@@ -661,8 +699,8 @@ async function loadRulesTab() {
                     <td>${escapeHtml(r.metric_field)} ${escapeHtml(r.operator)} ${r.threshold_value}</td>
                     <td class="${stateClass}">${stateText}</td>
                     <td>
-                        <button class="btn-small btn-secondary" data-action="toggle">${r.is_active ? "off" : "on"}</button>
-                        <button class="btn-small btn-secondary" data-action="delete">del</button>
+                        <button class="btn-small btn-secondary" data-action="toggle">${r.is_active ? t("rules.action.off") : t("rules.action.on")}</button>
+                        <button class="btn-small btn-secondary" data-action="delete">${t("rules.action.del")}</button>
                     </td>
                 </tr>
             `;
@@ -690,7 +728,7 @@ async function loadRulesTab() {
                 const rule = rules.find((r) => r.id === ruleId);
                 await patchRule(ruleId, {is_active: !rule.is_active});
             } else if (action === "delete") {
-                if (!confirm(`Удалить правило #${ruleId}?`)) return;
+                if (!confirm(`${t("rules.confirm.delete")}${ruleId}?`)) return;
                 await deleteRule(ruleId);
             }
             loadRulesTab();
@@ -720,26 +758,26 @@ async function loadEventsTab() {
 
 async function renderEvents() {
     const wrap = document.getElementById("events-table-wrap");
-    wrap.innerHTML = '<p class="empty">Загрузка…</p>';
+    wrap.innerHTML = `<p class="empty">${t("loading")}</p>`;
 
     const serverId = document.getElementById("events-server-filter").value || null;
     const events = await fetchEvents({serverId, limit: 100});
     if (events.length === 0) {
-        wrap.innerHTML = '<p class="empty">Событий не найдено.</p>';
+        wrap.innerHTML = `<p class="empty">${t("events.empty")}</p>`;
         return;
     }
 
     const rows = events
         .map((e) => {
             const statusClass = e.resolved_at ? "status-resolved" : "status-open";
-            const statusText = e.resolved_at ? "resolved" : "open";
+            const statusText = e.resolved_at ? t("events.status.resolved") : t("events.status.open");
             const resolvedAt = e.resolved_at ? new Date(e.resolved_at).toLocaleString() : "—";
             return `
                 <tr>
                     <td>#${e.id}</td>
                     <td>#${e.server_id}${e.container_name ? ` / ${escapeHtml(e.container_name)}` : ""}</td>
                     <td>#${e.rule_id}</td>
-                    <td>${e.metric_value} (порог ${e.threshold_value})</td>
+                    <td>${e.metric_value} (${t("events.threshold")} ${e.threshold_value})</td>
                     <td class="${statusClass}">${statusText}</td>
                     <td>${new Date(e.created_at).toLocaleString()}</td>
                     <td>${escapeHtml(resolvedAt)}</td>
@@ -926,7 +964,7 @@ async function confirmTotpEnable() {
     });
     if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        errorEl.textContent = detail.detail || `Ошибка ${response.status}`;
+        errorEl.textContent = detail.detail || `${t("error.prefix")} ${response.status}`;
         errorEl.hidden = false;
         return;
     }
@@ -945,7 +983,7 @@ async function disableTotp() {
     });
     if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        alert(detail.detail || `Ошибка ${response.status}`);
+        alert(detail.detail || `${t("error.prefix")} ${response.status}`);
         return;
     }
     currentUser = await response.json();
@@ -958,7 +996,7 @@ let auditCache = [];  // последний загруженный список 
 
 async function loadAuditTab() {
     const wrap = document.getElementById("audit-table-wrap");
-    wrap.innerHTML = '<p class="empty">…</p>';
+    wrap.innerHTML = `<p class="empty">${t("loading")}</p>`;
     auditCache = await fetchAuditLog(200);
     refreshAuditActionFilter();
     renderAuditTable();
