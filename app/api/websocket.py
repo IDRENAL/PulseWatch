@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import suppress
+
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 from sqlalchemy import select
@@ -13,6 +16,10 @@ router = APIRouter()
 
 # Стандартный WS close code для отказа аутентификации/политики.
 WS_POLICY_VIOLATION = 1008
+
+# Параметры батч-инсерта логов агента
+LOG_BATCH_MAX_SIZE = 50
+LOG_BATCH_MAX_AGE_SECONDS = 1.0
 
 
 @router.websocket("/ws/logs/{server_id}")
@@ -57,17 +64,42 @@ async def ws_agent_logs(
         return
 
     await websocket.accept()
-    try:
-        while True:
-            log_line = await websocket.receive_text()
-            # Сохраняем + бродкастим. Commit per-line простой, но при высоком rps
-            # стоило бы батчить — TODO когда упрёмся в нагрузку.
+
+    buffer: list[LogEntry] = []
+    flush_lock = asyncio.Lock()
+
+    async def flush() -> None:
+        # Лок сериализует доступ к db.session — её нельзя использовать конкурентно
+        async with flush_lock:
+            if not buffer:
+                return
+            items = list(buffer)
+            buffer.clear()
             try:
-                db.add(LogEntry(server_id=server.id, message=log_line))
+                db.add_all(items)
                 await db.commit()
             except Exception as exc:
                 await db.rollback()
-                logger.warning("log persist failed: {}", exc)
+                logger.warning("log batch persist failed ({} lines): {}", len(items), exc)
+
+    async def periodic_flush() -> None:
+        while True:
+            await asyncio.sleep(LOG_BATCH_MAX_AGE_SECONDS)
+            await flush()
+
+    flush_task = asyncio.create_task(periodic_flush())
+    try:
+        while True:
+            log_line = await websocket.receive_text()
+            buffer.append(LogEntry(server_id=server.id, message=log_line))
+            # Broadcast делаем сразу — для real-time выводу на дашборде батч ни к чему.
             await manager.broadcast(server.id, log_line)
+            if len(buffer) >= LOG_BATCH_MAX_SIZE:
+                await flush()
     except WebSocketDisconnect:
         pass
+    finally:
+        flush_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await flush_task
+        await flush()
