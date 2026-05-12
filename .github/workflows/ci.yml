@@ -15,7 +15,7 @@ jobs:
     name: Lint + format + types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
@@ -72,7 +72,7 @@ jobs:
       SECRET_KEY: ci-only-not-secret-${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
