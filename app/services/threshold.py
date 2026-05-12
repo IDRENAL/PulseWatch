@@ -4,6 +4,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.observability import alert_events_created_total
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule, MetricType, ThresholdOperator
 from app.redis_client import publish_alert
@@ -91,6 +92,7 @@ async def evaluate_system_metrics(
 
     if pending:
         await db.commit()
+        alert_events_created_total.inc(len(pending))
         for event, rule in pending:
             await db.refresh(event)
             _enqueue_notifications(event.id, rule.notification_channels)
@@ -170,6 +172,7 @@ async def evaluate_docker_metrics(
 
     if pending:
         await db.commit()
+        alert_events_created_total.inc(len(pending))
         for event, rule in pending:
             await db.refresh(event)
             _enqueue_notifications(event.id, rule.notification_channels)

@@ -3,6 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import verify_api_key
+from app.core.observability import metrics_ingested_total
 from app.database import get_db
 from app.models.metric import Metric
 from app.models.server import Server
@@ -38,6 +39,7 @@ async def submit_metric(
 
     await db.commit()
     await db.refresh(new_metric)
+    metrics_ingested_total.labels(kind="system").inc()
 
     # Проверяем метрики против пороговых правил
     try:

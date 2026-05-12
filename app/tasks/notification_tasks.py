@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.observability import notifications_sent_total
 from app.models.alert_event import AlertEvent
 from app.models.alert_rule import AlertRule
 from app.models.server import Server
@@ -73,6 +74,7 @@ async def _send(event_id: int) -> None:
                 user.id,
                 event_id,
             )
+            notifications_sent_total.labels(channel="telegram", status="skipped").inc()
             return
 
         if await is_channel_muted(server.id, "telegram"):
@@ -81,18 +83,24 @@ async def _send(event_id: int) -> None:
                 server.id,
                 event_id,
             )
+            notifications_sent_total.labels(channel="telegram", status="skipped").inc()
             return
 
         text = _format_message(event, rule, server)
 
         try:
             await send_message(user.telegram_chat_id, text)
+            notifications_sent_total.labels(channel="telegram", status="success").inc()
         except TelegramNotConfiguredError:
             logger.warning(
                 "send_telegram_alert: TELEGRAM_BOT_TOKEN не задан, пропускаем event id={}",
                 event_id,
             )
+            notifications_sent_total.labels(channel="telegram", status="skipped").inc()
             return
+        except TelegramSendError:
+            notifications_sent_total.labels(channel="telegram", status="failed").inc()
+            raise
         # TelegramSendError пробрасывается выше — Celery сделает ретрай
     finally:
         await redis.aclose()
@@ -157,6 +165,7 @@ async def _send_email(event_id: int) -> None:
                 user.id,
                 event_id,
             )
+            notifications_sent_total.labels(channel="email", status="skipped").inc()
             return
 
         if await is_channel_muted(server.id, "email"):
@@ -165,6 +174,7 @@ async def _send_email(event_id: int) -> None:
                 server.id,
                 event_id,
             )
+            notifications_sent_total.labels(channel="email", status="skipped").inc()
             return
 
         subject = f"[PulseWatch] {rule.name} — {server.name}"
@@ -173,12 +183,17 @@ async def _send_email(event_id: int) -> None:
 
         try:
             await send_email(user.email, subject, html_body, text_body)
+            notifications_sent_total.labels(channel="email", status="success").inc()
         except EmailNotConfiguredError:
             logger.warning(
                 "send_email_alert: SMTP не сконфигурирован, пропускаем event id={}",
                 event_id,
             )
+            notifications_sent_total.labels(channel="email", status="skipped").inc()
             return
+        except EmailSendError:
+            notifications_sent_total.labels(channel="email", status="failed").inc()
+            raise
         # EmailSendError пробрасывается выше — Celery сделает ретрай
     finally:
         await redis.aclose()

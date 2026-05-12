@@ -3,6 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import verify_api_key
+from app.core.observability import metrics_ingested_total
 from app.database import get_db
 from app.models.docker_metric import DockerMetric
 from app.models.server import Server
@@ -29,6 +30,7 @@ async def submit_docker_metrics(
     server.last_seen_at = func.now()
 
     await db.commit()
+    metrics_ingested_total.labels(kind="docker").inc(len(rows))
 
     # Проверяем docker-метрики против пороговых правил
     try:

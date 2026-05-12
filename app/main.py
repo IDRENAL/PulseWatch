@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -18,6 +19,7 @@ from app.api.servers import router as servers_router
 from app.api.websocket import router as websocket_router
 from app.api.ws_metrics import router as ws_metrics_router
 from app.config import settings
+from app.core.observability_refresh import refresh_gauges_loop
 from app.core.rate_limit import limiter
 from app.redis_client import get_redis, set_redis_client
 
@@ -33,9 +35,16 @@ async def lifespan(app: FastAPI):
     await client.ping()  # type: ignore[misc]  # redis-py stub: Awaitable[bool]|bool, async-вариант возвращает Awaitable
     app.state.redis = client
     set_redis_client(client)
+    # Periodic gauge refresh: считает users/servers/open-alerts каждые 30с и
+    # пишет в Prometheus. Если БД временно недоступна — тики пропускаются,
+    # цикл не падает.
+    gauge_task = asyncio.create_task(refresh_gauges_loop())
     try:
         yield
     finally:
+        gauge_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await gauge_task
         await client.aclose()
         set_redis_client(None)
 

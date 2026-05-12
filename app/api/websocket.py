@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import authenticate_ws_agent, authenticate_ws_user
 from app.core.connection_manager import manager
+from app.core.observability import logs_persisted_total
 from app.database import get_db
 from app.models.log_entry import LogEntry
 from app.models.server import Server
@@ -78,6 +79,7 @@ async def ws_agent_logs(
             try:
                 db.add_all(items)
                 await db.commit()
+                logs_persisted_total.inc(len(items))
             except Exception as exc:
                 await db.rollback()
                 logger.warning("log batch persist failed ({} lines): {}", len(items), exc)
