@@ -3,6 +3,7 @@
 // ─── i18n: ru/en через data-i18n атрибут ───────────────────────────────────
 
 const LANG_KEY = "pulsewatch.lang";
+const THEME_KEY = "pulsewatch.theme";
 
 const I18N = {
     ru: {
@@ -41,6 +42,8 @@ const I18N = {
         "logs.connect": "Подключить",
         "logs.disconnect": "Отключить",
         "logs.clear": "Очистить",
+        "theme.dark": "Тёмная",
+        "theme.light": "Светлая",
     },
     en: {
         "logout": "Logout",
@@ -78,10 +81,13 @@ const I18N = {
         "logs.connect": "Connect",
         "logs.disconnect": "Disconnect",
         "logs.clear": "Clear",
+        "theme.dark": "Dark",
+        "theme.light": "Light",
     },
 };
 
 let currentLang = localStorage.getItem(LANG_KEY) || (navigator.language?.startsWith("en") ? "en" : "ru");
+let currentTheme = localStorage.getItem(THEME_KEY) || "dark";
 
 function t(key) {
     return I18N[currentLang]?.[key] ?? I18N.ru[key] ?? key;
@@ -100,6 +106,47 @@ function setLang(lang) {
     applyTranslations();
     // Перерисовать табы которые рисуются программно (rules/events table, logs button)
     updateLogsToggleButton();
+}
+
+// ─── Темы: dark/light, persist в localStorage, чарты перерисовываются ──────
+
+function applyTheme() {
+    document.documentElement.dataset.theme = currentTheme;
+}
+
+function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+    applyTheme();
+    // Перерисовать все чарты с новой палитрой
+    refreshChartColors();
+}
+
+function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function chartPalette() {
+    return {
+        text: cssVar("--text-secondary"),
+        textBright: cssVar("--text-primary"),
+        grid: cssVar("--bg-tertiary"),
+        tooltip: cssVar("--bg-secondary"),
+    };
+}
+
+function refreshChartColors() {
+    for (const chart of [currentChart, aggregatesChart]) {
+        if (!chart) continue;
+        const p = chartPalette();
+        chart.options.scales.y.ticks.color = p.text;
+        chart.options.scales.y.grid.color = p.grid;
+        chart.options.scales.x.ticks.color = p.text;
+        chart.options.scales.x.grid.color = p.grid;
+        chart.options.plugins.legend.labels.color = p.textBright;
+        chart.options.plugins.tooltip.backgroundColor = p.tooltip;
+        chart.update("none");
+    }
 }
 
 // ─── Хранение токенов ───────────────────────────────────────────────────────
@@ -379,6 +426,7 @@ function renderChart(metrics) {
 }
 
 function lineChartConfig(labels, series) {
+    const p = chartPalette();
     return {
         type: "line",
         data: {
@@ -396,12 +444,12 @@ function lineChartConfig(labels, series) {
             maintainAspectRatio: false,
             interaction: {mode: "index", intersect: false},
             scales: {
-                y: {min: 0, max: 100, ticks: {color: "#a6adc8"}, grid: {color: "#313244"}},
-                x: {ticks: {color: "#a6adc8", maxRotation: 0, autoSkip: true}, grid: {color: "#313244"}},
+                y: {min: 0, max: 100, ticks: {color: p.text}, grid: {color: p.grid}},
+                x: {ticks: {color: p.text, maxRotation: 0, autoSkip: true}, grid: {color: p.grid}},
             },
             plugins: {
-                legend: {labels: {color: "#cdd6f4"}},
-                tooltip: {backgroundColor: "#181825"},
+                legend: {labels: {color: p.textBright}},
+                tooltip: {backgroundColor: p.tooltip},
             },
         },
     };
@@ -565,12 +613,14 @@ async function loadRulesTab() {
         .join("");
 
     wrap.innerHTML = `
-        <table>
-            <thead>
-                <tr><th>id</th><th>name</th><th>server</th><th>type</th><th>condition</th><th>state</th><th></th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>id</th><th>name</th><th>server</th><th>type</th><th>condition</th><th>state</th><th></th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
     `;
 
     // Привязываем обработчики
@@ -642,12 +692,14 @@ async function renderEvents() {
         .join("");
 
     wrap.innerHTML = `
-        <table>
-            <thead>
-                <tr><th>id</th><th>server</th><th>rule</th><th>value</th><th>status</th><th>created</th><th>resolved</th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>id</th><th>server</th><th>rule</th><th>value</th><th>status</th><th>created</th><th>resolved</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
     `;
 }
 
@@ -783,6 +835,12 @@ async function init() {
     langSel.value = currentLang;
     langSel.addEventListener("change", (e) => setLang(e.target.value));
     applyTranslations();
+
+    // theme init: тема уже применена inline-скриптом в <head>, тут только селектор
+    const themeSel = document.getElementById("theme-switcher");
+    themeSel.value = currentTheme;
+    themeSel.addEventListener("change", (e) => setTheme(e.target.value));
+    applyTheme();
 
     document.getElementById("login-form").addEventListener("submit", async (e) => {
         e.preventDefault();
