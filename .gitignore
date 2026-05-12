@@ -6,6 +6,10 @@
 # Резервные копии Postgres
 backups/
 
+# Сгенерированный SDK (см. make sdk)
+sdk/pulsewatch_client/
+sdk/dist/
+
 # Python
 __pycache__/
 *.py[cod]
