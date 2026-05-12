@@ -16,6 +16,14 @@ const I18N = {
         "tab.events": "События",
         "tab.aggregates": "Агрегаты",
         "tab.logs": "Логи",
+        "tab.audit": "История",
+        "audit.title": "История действий",
+        "audit.filter.action": "Действие:",
+        "audit.empty": "Записей нет.",
+        "audit.col.when": "Когда",
+        "audit.col.action": "Действие",
+        "audit.col.resource": "Объект",
+        "audit.col.ip": "IP",
         "login.title": "Вход",
         "login.email": "Email",
         "login.password": "Пароль",
@@ -58,6 +66,14 @@ const I18N = {
         "tab.events": "Events",
         "tab.aggregates": "Aggregates",
         "tab.logs": "Logs",
+        "tab.audit": "Audit",
+        "audit.title": "Audit history",
+        "audit.filter.action": "Action:",
+        "audit.empty": "No entries.",
+        "audit.col.when": "When",
+        "audit.col.action": "Action",
+        "audit.col.resource": "Resource",
+        "audit.col.ip": "IP",
         "login.title": "Sign in",
         "login.email": "Email",
         "login.password": "Password",
@@ -304,6 +320,11 @@ async function fetchAggregates(serverId, period, limit = 100) {
     return response.ok ? response.json() : [];
 }
 
+async function fetchAuditLog(limit = 100) {
+    const response = await apiFetch(`/audit/me?limit=${limit}`);
+    return response.ok ? response.json() : [];
+}
+
 // ─── Состояние ──────────────────────────────────────────────────────────────
 
 const MAX_POINTS = 60;
@@ -350,6 +371,7 @@ function setTab(name) {
     else if (name === "events") loadEventsTab();
     else if (name === "aggregates") initAggregatesTab();
     else if (name === "logs") initLogsTab();
+    else if (name === "audit") loadAuditTab();
 }
 
 // ─── Servers tab ────────────────────────────────────────────────────────────
@@ -811,6 +833,75 @@ function closeLogsWs() {
     }
 }
 
+// ─── Audit tab ──────────────────────────────────────────────────────────────
+
+let auditCache = [];  // последний загруженный список — фильтруем клиент-сайд
+
+async function loadAuditTab() {
+    const wrap = document.getElementById("audit-table-wrap");
+    wrap.innerHTML = '<p class="empty">…</p>';
+    auditCache = await fetchAuditLog(200);
+    refreshAuditActionFilter();
+    renderAuditTable();
+}
+
+function refreshAuditActionFilter() {
+    const sel = document.getElementById("audit-action-filter");
+    const current = sel.value;
+    const actions = [...new Set(auditCache.map((e) => e.action))].sort();
+    sel.innerHTML = `<option value="">${t("filter.all")}</option>`;
+    for (const a of actions) {
+        const opt = document.createElement("option");
+        opt.value = a;
+        opt.textContent = a;
+        sel.appendChild(opt);
+    }
+    sel.value = actions.includes(current) ? current : "";
+}
+
+function renderAuditTable() {
+    const wrap = document.getElementById("audit-table-wrap");
+    const filter = document.getElementById("audit-action-filter").value;
+    const entries = filter ? auditCache.filter((e) => e.action === filter) : auditCache;
+
+    if (entries.length === 0) {
+        wrap.innerHTML = `<p class="empty">${t("audit.empty")}</p>`;
+        return;
+    }
+
+    const rows = entries
+        .map((e) => {
+            const resource = e.resource_type
+                ? `${escapeHtml(e.resource_type)}${e.resource_id ? ` #${e.resource_id}` : ""}`
+                : "—";
+            return `
+                <tr>
+                    <td>${escapeHtml(new Date(e.created_at).toLocaleString())}</td>
+                    <td>${escapeHtml(e.action)}</td>
+                    <td>${resource}</td>
+                    <td>${escapeHtml(e.ip_address || "—")}</td>
+                </tr>
+            `;
+        })
+        .join("");
+
+    wrap.innerHTML = `
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>${t("audit.col.when")}</th>
+                        <th>${t("audit.col.action")}</th>
+                        <th>${t("audit.col.resource")}</th>
+                        <th>${t("audit.col.ip")}</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
 // ─── Login/Dashboard ────────────────────────────────────────────────────────
 
 function renderLogin() {
@@ -911,6 +1002,10 @@ async function init() {
 
     // Aggregates tab handlers
     document.getElementById("aggregates-load").addEventListener("click", loadAggregatesChart);
+
+    // Audit tab handlers
+    document.getElementById("audit-refresh").addEventListener("click", loadAuditTab);
+    document.getElementById("audit-action-filter").addEventListener("change", renderAuditTable);
 
     // Logs tab handlers
     document.getElementById("logs-toggle").addEventListener("click", toggleLogsWs);
