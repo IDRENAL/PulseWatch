@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PulseWatch</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Применяем сохранённую тему до отрисовки, чтобы не было «вспышки» противоположной темы
+        (function () {
+            try {
+                var saved = localStorage.getItem("pulsewatch.theme");
+                if (saved === "light" || saved === "dark") {
+                    document.documentElement.dataset.theme = saved;
+                }
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
 </head>
 <body>
     <header>
@@ -13,6 +24,10 @@
             <select id="lang-switcher" aria-label="Language">
                 <option value="ru">RU</option>
                 <option value="en">EN</option>
+            </select>
+            <select id="theme-switcher" aria-label="Theme">
+                <option value="dark" data-i18n="theme.dark">Тёмная</option>
+                <option value="light" data-i18n="theme.light">Светлая</option>
             </select>
             <div id="user-bar" hidden>
                 <span id="user-email"></span>
