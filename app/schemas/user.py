@@ -15,6 +15,7 @@ class UserRead(BaseModel):
     created_at: datetime
     telegram_chat_id: str | None = None
     email_alerts_enabled: bool = True
+    totp_enabled: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

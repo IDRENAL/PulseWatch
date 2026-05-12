@@ -366,6 +366,44 @@ tr:hover td {
     word-break: break-word;
 }
 
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+}
+
+.modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    min-width: 320px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+#totp-qr img,
+#totp-qr canvas {
+    display: block;
+    margin: 0 auto;
+}
+
+#profile-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+
+#profile-btn:hover {
+    color: var(--text-primary);
+}
+
 /* Auxiliary screens (reset password) */
 .centered-card {
     max-width: 420px;
