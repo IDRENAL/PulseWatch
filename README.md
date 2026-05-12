@@ -128,8 +128,7 @@ curl -X POST http://localhost:8000/servers/register \
 - `POST /auth/logout` — отзывает refresh-токен (идемпотентно, всегда 204). Тело JSON: `{"refresh_token": "..."}`.
 - `POST /auth/forgot-password` — принимает `{"email":"..."}`, всегда возвращает 200 (не раскрываем существующие email). Если юзер найден, в Redis кладётся одноразовый токен `pwd_reset:<token>` (TTL = `PASSWORD_RESET_TOKEN_TTL_SECONDS`), на `users.email` шлётся письмо со ссылкой `<FRONTEND_BASE_URL>/reset-password?token=<token>`. Лимит **3/min на IP**.
 - `POST /auth/reset-password` — обменивает токен на новый пароль (`{"token":"...", "new_password":"..."}`). Атомарно: `GET+DEL` через Redis pipeline. После успеха отзываем ВСЕ refresh-токены юзера (старые сессии должны заново логиниться). Лимит **5/min на IP**.
-- `GET /auth/me` — текущий юзер (поля включают `totp_enabled: bool`, `subscription_tier: str`).
-- `GET /auth/me/quota` — потребление и лимиты текущего тарифа: `{tier, servers_used, servers_max, rules_used, rules_max}`. `*_max = -1` означает безлимит.
+- `GET /auth/me` — текущий юзер (поля включают `totp_enabled: bool`).
 - `POST /auth/me/totp/setup` — генерит свежий `pyotp.random_base32()` secret, ставит `totp_enabled=false`. Возвращает `{secret, otpauth_url}` (URL для QR: `otpauth://totp/PulseWatch:<email>?secret=...&issuer=PulseWatch`). Повторный вызов сбрасывает старый secret.
 - `POST /auth/me/totp/enable` — подтверждает код от приложения (`{"code":"123456"}`), выставляет `totp_enabled=true`. С этого момента логин требует второй фактор.
 - `POST /auth/me/totp/disable` — требует пароль (`{"password":"..."}`) чтобы украденный access-токен не мог снять 2FA. Очищает `totp_secret` и `totp_enabled`.
@@ -284,20 +283,6 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 ```
 
 Если `SMTP_HOST` не задан — канал молча выключен, никаких ошибок.
-
-## Тарифы и квоты
-
-Каждому юзеру при регистрации присваивается `subscription_tier="free"`. Тариф ограничивает максимальное количество серверов и алерт-правил. При превышении `POST /servers/register` или `POST /alerts/rules` возвращает **402 Payment Required**.
-
-| Тариф | Серверы | Правила |
-|---|---|---|
-| `free` *(default)* | 3 | 10 |
-| `pro` | 20 | 100 |
-| `enterprise` | ∞ | ∞ |
-
-Смена тарифа сейчас только через прямой `UPDATE users SET subscription_tier='pro' WHERE id=...` (платёжная интеграция вне scope). Текущее потребление и лимиты юзер видит через `GET /auth/me/quota` — можно показывать в UI «осталось N из M серверов».
-
-Лимиты редактируются в `app/core/quotas.py:TIER_LIMITS` (тариф = строка, новые планы добавляются без миграции).
 
 ## Observability (Prometheus + Grafana)
 
