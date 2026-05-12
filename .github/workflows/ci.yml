@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint + format + types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python via uv
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format (check only)
+        run: uv run ruff format --check .
+      - name: mypy
+        run: uv run mypy .
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pulsewatch
+          POSTGRES_PASSWORD: pulsewatch_ci
+          POSTGRES_DB: pulsewatch
+        ports:
+          - 5432:5432
+        # health-check чтобы шаги до миграций не стартовали раньше, чем Postgres готов
+        options: >-
+          --health-cmd "pg_isready -U pulsewatch"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_USER: pulsewatch
+      DB_PASSWORD: pulsewatch_ci
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: pulsewatch
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      SECRET_KEY: ci-only-not-secret-${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python via uv
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run migrations
+        run: uv run alembic upgrade head
+      - name: pytest
+        run: uv run pytest -v --maxfail=5
