@@ -1,7 +1,5 @@
 # PulseWatch
 
-![CI](https://github.com/IDRENAL/PulseWatch/actions/workflows/ci.yml/badge.svg)
-
 Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и email, отдаёт реал-тайм поток через WebSocket в браузерный дашборд, а HTTP-метрики бэкенда отдаёт в Prometheus-формате для Grafana.
 
 Учебный проект, реализующий 7-этапный план разработки + хвостовые фичи поверх (telegram-бот с командами админки, email-канал, auto-resolve, per-channel mute, Prometheus/Grafana, refresh-токены с reuse-detection, TOTP 2FA, password reset, audit log, persisted logs, Slack-receiver, frontend-дашборд с тёмной/светлой темой, RU/EN i18n, мобильной вёрсткой, /v1 API-версионированием).
@@ -432,14 +430,6 @@ make sdk
 # затем `python examples/use_sdk.py` чтобы попробовать
 ```
 
-### CI
-
-`.github/workflows/ci.yml` запускается на push в master и PRs. Два job'а:
-- **lint** — `ruff check`, `ruff format --check`, `mypy`
-- **test** — `alembic upgrade head` + `pytest`, с Postgres 16 и Redis 7 в качестве service-контейнеров GitHub Actions
-
-`SECRET_KEY` в CI генерится из `github.sha` (не для прода). Dependabot настроен в `.github/dependabot.yml` — ежемесячные апдейты github-actions и pip.
-
 ### Структура
 
 ```
@@ -458,7 +448,6 @@ agent/
 static/       # frontend: index.html, app.js, style.css, reset-password.{html,js}
 sdk/          # README для генерации Python SDK через `make sdk` (артефакт в .gitignore)
 examples/     # use_sdk.py — демо использования сгенерированного клиента
-.github/      # CI workflow (ci.yml) + dependabot.yml
 grafana/      # provisioning datasources/dashboards
 alembic/      # миграции
 tests/
