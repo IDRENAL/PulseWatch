@@ -16,7 +16,7 @@ import secrets
 import httpx
 
 BASE_URL = "http://localhost:8000"
-EMAIL = "demo@pulsewatch.local"
+EMAIL = "demo@example.com"
 PASSWORD = "demopass123"
 METRIC_INTERVAL_SECONDS = 5
 

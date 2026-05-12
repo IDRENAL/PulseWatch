@@ -25,6 +25,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+COPY static ./static
 
 EXPOSE 8000
 
