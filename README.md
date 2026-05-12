@@ -1,5 +1,7 @@
 # PulseWatch
 
+![CI](https://github.com/IDRENAL/PulseWatch/actions/workflows/ci.yml/badge.svg)
+
 Self-hosted система мониторинга серверов: агенты собирают метрики (CPU/RAM/диск + Docker-контейнеры + journald-логи), отправляют на бэкенд, который сохраняет в Postgres, агрегирует, проверяет алерт-правила, шлёт уведомления в Telegram и email, отдаёт реал-тайм поток через WebSocket в браузерный дашборд, а HTTP-метрики бэкенда отдаёт в Prometheus-формате для Grafana.
 
 Учебный проект, реализующий 7-этапный план разработки + хвостовые фичи поверх (telegram-бот с командами админки, email-канал, auto-resolve, per-channel mute, Prometheus/Grafana, refresh-токены с reuse-detection, TOTP 2FA, password reset, audit log, persisted logs, Slack-receiver, frontend-дашборд с тёмной/светлой темой, RU/EN i18n, мобильной вёрсткой, /v1 API-версионированием).
@@ -126,7 +128,8 @@ curl -X POST http://localhost:8000/servers/register \
 - `POST /auth/logout` — отзывает refresh-токен (идемпотентно, всегда 204). Тело JSON: `{"refresh_token": "..."}`.
 - `POST /auth/forgot-password` — принимает `{"email":"..."}`, всегда возвращает 200 (не раскрываем существующие email). Если юзер найден, в Redis кладётся одноразовый токен `pwd_reset:<token>` (TTL = `PASSWORD_RESET_TOKEN_TTL_SECONDS`), на `users.email` шлётся письмо со ссылкой `<FRONTEND_BASE_URL>/reset-password?token=<token>`. Лимит **3/min на IP**.
 - `POST /auth/reset-password` — обменивает токен на новый пароль (`{"token":"...", "new_password":"..."}`). Атомарно: `GET+DEL` через Redis pipeline. После успеха отзываем ВСЕ refresh-токены юзера (старые сессии должны заново логиниться). Лимит **5/min на IP**.
-- `GET /auth/me` — текущий юзер (поля включают `totp_enabled: bool`).
+- `GET /auth/me` — текущий юзер (поля включают `totp_enabled: bool`, `subscription_tier: str`).
+- `GET /auth/me/quota` — потребление и лимиты текущего тарифа: `{tier, servers_used, servers_max, rules_used, rules_max}`. `*_max = -1` означает безлимит.
 - `POST /auth/me/totp/setup` — генерит свежий `pyotp.random_base32()` secret, ставит `totp_enabled=false`. Возвращает `{secret, otpauth_url}` (URL для QR: `otpauth://totp/PulseWatch:<email>?secret=...&issuer=PulseWatch`). Повторный вызов сбрасывает старый secret.
 - `POST /auth/me/totp/enable` — подтверждает код от приложения (`{"code":"123456"}`), выставляет `totp_enabled=true`. С этого момента логин требует второй фактор.
 - `POST /auth/me/totp/disable` — требует пароль (`{"password":"..."}`) чтобы украденный access-токен не мог снять 2FA. Очищает `totp_secret` и `totp_enabled`.
@@ -282,6 +285,20 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 
 Если `SMTP_HOST` не задан — канал молча выключен, никаких ошибок.
 
+## Тарифы и квоты
+
+Каждому юзеру при регистрации присваивается `subscription_tier="free"`. Тариф ограничивает максимальное количество серверов и алерт-правил. При превышении `POST /servers/register` или `POST /alerts/rules` возвращает **402 Payment Required**.
+
+| Тариф | Серверы | Правила |
+|---|---|---|
+| `free` *(default)* | 3 | 10 |
+| `pro` | 20 | 100 |
+| `enterprise` | ∞ | ∞ |
+
+Смена тарифа сейчас только через прямой `UPDATE users SET subscription_tier='pro' WHERE id=...` (платёжная интеграция вне scope). Текущее потребление и лимиты юзер видит через `GET /auth/me/quota` — можно показывать в UI «осталось N из M серверов».
+
+Лимиты редактируются в `app/core/quotas.py:TIER_LIMITS` (тариф = строка, новые планы добавляются без миграции).
+
 ## Observability (Prometheus + Grafana)
 
 Бэкенд отдаёт HTTP-метрики в Prometheus-формате на `/metrics/prometheus` (счётчики запросов, латентность, статус-коды — собираются через middleware `prometheus-fastapi-instrumentator`). В compose уже есть два готовых сервиса:
@@ -305,6 +322,20 @@ curl -X PATCH http://localhost:8000/auth/me/email-alerts \
 4. `docker compose restart alertmanager`.
 
 Если оставить плейсхолдер `REPLACE_ME` — Slack-доставка просто будет молча фейлиться, webhook к app продолжит работать.
+
+**Бизнес-метрики PulseWatch** (помимо HTTP-метрик от instrumentator):
+
+| Метрика | Тип | Лейблы |
+|---|---|---|
+| `pulsewatch_metrics_ingested_total` | Counter | `kind=system\|docker` |
+| `pulsewatch_logs_persisted_total` | Counter | — |
+| `pulsewatch_alert_events_created_total` | Counter | — |
+| `pulsewatch_notifications_sent_total` | Counter | `channel=telegram\|email`, `status=success\|failed\|skipped` |
+| `pulsewatch_users_total` | Gauge | — |
+| `pulsewatch_servers_total` | Gauge | `status=active\|inactive\|paused` |
+| `pulsewatch_open_alerts_total` | Gauge | — |
+
+Counters инкрементятся в момент события. Gauges раз в 30с обновляются фоновой таской из lifespan FastAPI (`app/core/observability_refresh.py`).
 
 **Готовые Prometheus-алерты** (`prometheus_rules.yml`):
 
@@ -410,7 +441,19 @@ uv run alembic upgrade head
 
 # Запуск агента локально
 make agent
+
+# Сгенерировать Python SDK из живого /openapi.json (бэкенд на :8000)
+make sdk
+# затем `python examples/use_sdk.py` чтобы попробовать
 ```
+
+### CI
+
+`.github/workflows/ci.yml` запускается на push в master и PRs. Два job'а:
+- **lint** — `ruff check`, `ruff format --check`, `mypy`
+- **test** — `alembic upgrade head` + `pytest`, с Postgres 16 и Redis 7 в качестве service-контейнеров GitHub Actions
+
+`SECRET_KEY` в CI генерится из `github.sha` (не для прода). Dependabot настроен в `.github/dependabot.yml` — ежемесячные апдейты github-actions и pip.
 
 ### Структура
 
@@ -428,6 +471,9 @@ agent/
   collectors/ # system (psutil), docker (SDK), logs (journald)
   agent.py, sender.py, logs_streamer.py, __init__.py (__version__)
 static/       # frontend: index.html, app.js, style.css, reset-password.{html,js}
+sdk/          # README для генерации Python SDK через `make sdk` (артефакт в .gitignore)
+examples/     # use_sdk.py — демо использования сгенерированного клиента
+.github/      # CI workflow (ci.yml) + dependabot.yml
 grafana/      # provisioning datasources/dashboards
 alembic/      # миграции
 tests/
