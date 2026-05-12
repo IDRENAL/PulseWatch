@@ -30,7 +30,7 @@
                 <option value="light" data-i18n="theme.light">Светлая</option>
             </select>
             <div id="user-bar" hidden>
-                <span id="user-email"></span>
+                <button id="profile-btn" class="btn-secondary"><span id="user-email"></span></button>
                 <button id="logout-btn" data-i18n="logout">Logout</button>
             </div>
         </div>
@@ -57,6 +57,10 @@
                 <label>
                     <span data-i18n="login.password">Пароль</span>
                     <input type="password" id="login-password" required autocomplete="current-password">
+                </label>
+                <label id="login-totp-wrap" hidden>
+                    <span data-i18n="login.totp">Код 2FA</span>
+                    <input type="text" id="login-totp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
                 </label>
                 <button type="submit" data-i18n="login.submit">Войти</button>
             </form>
@@ -187,6 +191,41 @@
             <pre id="logs-stream"></pre>
         </section>
 
+        <!-- Profile modal -->
+        <div id="profile-modal" class="modal-overlay" hidden>
+            <div class="modal">
+                <h3 data-i18n="profile.title">Профиль</h3>
+                <p id="profile-email" class="empty"></p>
+                <div id="totp-status-area">
+                    <p>
+                        <span data-i18n="profile.totp.label">2FA:</span>
+                        <strong id="totp-status-text">—</strong>
+                    </p>
+                    <button id="totp-enable-btn" data-i18n="profile.totp.enable" hidden>Включить 2FA</button>
+                    <button id="totp-disable-btn" class="btn-secondary" data-i18n="profile.totp.disable" hidden>Выключить 2FA</button>
+                </div>
+                <div id="totp-setup-area" hidden>
+                    <p data-i18n="profile.totp.scan">
+                        Отсканируй QR в приложении (Google Authenticator, Authy и т.п.):
+                    </p>
+                    <div id="totp-qr" style="margin: 12px 0;"></div>
+                    <p>
+                        <span data-i18n="profile.totp.manual">Или вручную:</span>
+                        <code id="totp-secret" style="user-select: all;"></code>
+                    </p>
+                    <label>
+                        <span data-i18n="profile.totp.code">Код из приложения</span>
+                        <input type="text" id="totp-confirm-code" inputmode="numeric" pattern="[0-9]*" maxlength="6">
+                    </label>
+                    <button id="totp-confirm-btn" data-i18n="profile.totp.confirm">Подтвердить</button>
+                    <p id="totp-error" class="error" hidden></p>
+                </div>
+                <p style="margin-top: 16px;">
+                    <button id="profile-close" class="btn-secondary" data-i18n="cancel">Закрыть</button>
+                </p>
+            </div>
+        </div>
+
         <!-- Audit tab -->
         <section class="tab-view" id="view-audit" hidden>
             <h2 data-i18n="audit.title">История действий</h2>
@@ -204,6 +243,7 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

@@ -31,6 +31,19 @@ const I18N = {
         "login.forgot": "Забыли пароль?",
         "login.forgot.prompt": "Введи email — пришлём ссылку для сброса пароля",
         "login.forgot.sent": "Если такой email зарегистрирован, ссылка для сброса отправлена.",
+        "login.totp": "Код 2FA",
+        "login.totp.required": "Введи 6-значный код из приложения 2FA",
+        "profile.title": "Профиль",
+        "profile.totp.label": "2FA:",
+        "profile.totp.on": "включено",
+        "profile.totp.off": "выключено",
+        "profile.totp.enable": "Включить 2FA",
+        "profile.totp.disable": "Выключить 2FA",
+        "profile.totp.scan": "Отсканируй QR в приложении (Google Authenticator, Authy и т.п.):",
+        "profile.totp.manual": "Или вручную:",
+        "profile.totp.code": "Код из приложения",
+        "profile.totp.confirm": "Подтвердить",
+        "profile.totp.disable.prompt": "Введи пароль для отключения 2FA",
         "rules.title": "Алерт-правила",
         "rules.create": "Создать правило",
         "rules.submit": "Создать",
@@ -81,6 +94,19 @@ const I18N = {
         "login.forgot": "Forgot password?",
         "login.forgot.prompt": "Enter your email — we'll send a reset link",
         "login.forgot.sent": "If this email is registered, a reset link has been sent.",
+        "login.totp": "2FA code",
+        "login.totp.required": "Enter the 6-digit code from your 2FA app",
+        "profile.title": "Profile",
+        "profile.totp.label": "2FA:",
+        "profile.totp.on": "on",
+        "profile.totp.off": "off",
+        "profile.totp.enable": "Enable 2FA",
+        "profile.totp.disable": "Disable 2FA",
+        "profile.totp.scan": "Scan the QR with an app (Google Authenticator, Authy, ...):",
+        "profile.totp.manual": "Or enter manually:",
+        "profile.totp.code": "Code from app",
+        "profile.totp.confirm": "Confirm",
+        "profile.totp.disable.prompt": "Enter your password to disable 2FA",
         "rules.title": "Alert rules",
         "rules.create": "Create rule",
         "rules.submit": "Create",
@@ -227,10 +253,11 @@ async function tryRefresh(refreshToken) {
 
 // ─── Auth-операции ──────────────────────────────────────────────────────────
 
-async function login(email, password) {
+async function login(email, password, totpCode = null) {
     const body = new URLSearchParams();
     body.set("username", email);
     body.set("password", password);
+    if (totpCode) body.set("totp_code", totpCode);
 
     const response = await fetch("/auth/login", {
         method: "POST",
@@ -240,6 +267,8 @@ async function login(email, password) {
 
     if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
+        // Сервер шлёт detail="TOTP_REQUIRED" когда нужен второй фактор —
+        // прокидываем как есть, чтобы UI показал поле для кода
         throw new Error(detail.detail || `Ошибка входа (${response.status})`);
     }
 
@@ -833,6 +862,96 @@ function closeLogsWs() {
     }
 }
 
+// ─── Profile modal + TOTP ──────────────────────────────────────────────────
+
+let currentUser = null;
+
+async function openProfileModal() {
+    currentUser = await fetchMe();
+    if (!currentUser) return;
+
+    document.getElementById("profile-email").textContent = currentUser.email;
+    renderTotpStatus();
+    document.getElementById("totp-setup-area").hidden = true;
+    document.getElementById("profile-modal").hidden = false;
+}
+
+function closeProfileModal() {
+    document.getElementById("profile-modal").hidden = true;
+}
+
+function renderTotpStatus() {
+    const enabled = !!currentUser?.totp_enabled;
+    document.getElementById("totp-status-text").textContent = enabled
+        ? t("profile.totp.on")
+        : t("profile.totp.off");
+    document.getElementById("totp-enable-btn").hidden = enabled;
+    document.getElementById("totp-disable-btn").hidden = !enabled;
+}
+
+async function startTotpSetup() {
+    const response = await apiFetch("/auth/me/totp/setup", {method: "POST"});
+    if (!response.ok) return;
+    const data = await response.json();
+
+    document.getElementById("totp-secret").textContent = data.secret;
+    renderQrCode(data.otpauth_url, "totp-qr");
+    document.getElementById("totp-confirm-code").value = "";
+    document.getElementById("totp-error").hidden = true;
+    document.getElementById("totp-setup-area").hidden = false;
+}
+
+function renderQrCode(text, elementId) {
+    const target = document.getElementById(elementId);
+    target.innerHTML = "";
+    // qrcode-generator: typeNumber=0 → авто, "M" — средний уровень коррекции
+    const qr = qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    // createImgTag(cellSize=4, margin=4) — 4px на ячейку, тонкая рамка
+    target.innerHTML = qr.createImgTag(4, 4);
+}
+
+async function confirmTotpEnable() {
+    const code = document.getElementById("totp-confirm-code").value.trim();
+    if (!code) return;
+
+    const errorEl = document.getElementById("totp-error");
+    errorEl.hidden = true;
+
+    const response = await apiFetch("/auth/me/totp/enable", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({code}),
+    });
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        errorEl.textContent = detail.detail || `Ошибка ${response.status}`;
+        errorEl.hidden = false;
+        return;
+    }
+    currentUser = await response.json();
+    document.getElementById("totp-setup-area").hidden = true;
+    renderTotpStatus();
+}
+
+async function disableTotp() {
+    const password = prompt(t("profile.totp.disable.prompt"));
+    if (!password) return;
+    const response = await apiFetch("/auth/me/totp/disable", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({password}),
+    });
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        alert(detail.detail || `Ошибка ${response.status}`);
+        return;
+    }
+    currentUser = await response.json();
+    renderTotpStatus();
+}
+
 // ─── Audit tab ──────────────────────────────────────────────────────────────
 
 let auditCache = [];  // последний загруженный список — фильтруем клиент-сайд
@@ -943,21 +1062,36 @@ async function init() {
         e.preventDefault();
         const email = document.getElementById("login-email").value;
         const password = document.getElementById("login-password").value;
+        const totpCode = document.getElementById("login-totp").value || null;
         const errorEl = document.getElementById("login-error");
         errorEl.hidden = true;
 
         try {
-            await login(email, password);
+            await login(email, password, totpCode);
             const user = await fetchMe();
             if (user) renderDashboard(user);
             else renderLogin();
         } catch (err) {
-            errorEl.textContent = err.message;
-            errorEl.hidden = false;
+            if (err.message === "TOTP_REQUIRED") {
+                document.getElementById("login-totp-wrap").hidden = false;
+                errorEl.textContent = t("login.totp.required");
+                errorEl.hidden = false;
+                document.getElementById("login-totp").focus();
+            } else {
+                errorEl.textContent = err.message;
+                errorEl.hidden = false;
+            }
         }
     });
 
     document.getElementById("logout-btn").addEventListener("click", logout);
+
+    // Profile modal handlers
+    document.getElementById("profile-btn").addEventListener("click", openProfileModal);
+    document.getElementById("profile-close").addEventListener("click", closeProfileModal);
+    document.getElementById("totp-enable-btn").addEventListener("click", startTotpSetup);
+    document.getElementById("totp-disable-btn").addEventListener("click", disableTotp);
+    document.getElementById("totp-confirm-btn").addEventListener("click", confirmTotpEnable);
 
     // «Забыли пароль?» — prompt email, POST /auth/forgot-password
     document.getElementById("forgot-password-link").addEventListener("click", async (e) => {
