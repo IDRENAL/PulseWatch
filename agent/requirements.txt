@@ -1,0 +1,6 @@
+httpx>=0.28.1
+psutil>=6.1.0
+loguru>=0.7.2
+pydantic-settings>=2.14.0
+docker>=7.1.0
+websockets>=16.0
