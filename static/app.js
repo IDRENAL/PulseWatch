@@ -34,6 +34,20 @@ const I18N = {
         "login.totp": "Код 2FA",
         "login.totp.required": "Введи 6-значный код из приложения 2FA",
         "profile.title": "Профиль",
+        "profile.notifications.title": "Уведомления",
+        "profile.email.label": "Email-уведомления",
+        "profile.email.error": "Не удалось переключить email-уведомления",
+        "profile.telegram.label": "Telegram:",
+        "profile.telegram.unlinked": "не привязан",
+        "profile.telegram.linked": "привязан (chat_id: {chat_id})",
+        "profile.telegram.link.button": "Привязать",
+        "profile.telegram.unlink.button": "Отвязать",
+        "profile.telegram.unlink.confirm": "Отвязать Telegram? Уведомления перестанут приходить.",
+        "profile.telegram.code.instructions": "Открой ссылку в Telegram или отправь боту команду /start <код>:",
+        "profile.telegram.code.label": "Код:",
+        "profile.telegram.open": "Открыть в Telegram",
+        "profile.telegram.refresh": "Проверить",
+        "profile.telegram.no_link_yet": "Бот ещё не подтвердил привязку — отправь ему код и нажми «Проверить».",
         "profile.totp.label": "2FA:",
         "profile.totp.on": "включено",
         "profile.totp.off": "выключено",
@@ -44,6 +58,13 @@ const I18N = {
         "profile.totp.code": "Код из приложения",
         "profile.totp.confirm": "Подтвердить",
         "profile.totp.disable.prompt": "Введи пароль для отключения 2FA",
+        "servers.rotate.button": "Ротировать API-ключ",
+        "servers.rotate.title": "Новый API-ключ",
+        "servers.rotate.warning": "Покажу ОДИН раз. Скопируй и обнови агент. Старый ключ больше не работает.",
+        "servers.rotate.copy": "Скопировать",
+        "servers.rotate.confirm": "Старый ключ моментально перестанет работать. Продолжить?",
+        "servers.rotate.error": "Не удалось ротировать ключ",
+        "servers.rotate.copied": "✓ Скопировано",
         "rules.title": "Алерт-правила",
         "rules.create": "Создать правило",
         "rules.submit": "Создать",
@@ -53,6 +74,12 @@ const I18N = {
         "rules.field.container": "Имя контейнера (пусто = любой)",
         "rules.field.metric": "Метрика",
         "rules.field.operator": "Оператор",
+        "rules.operator.gt": "> (больше)",
+        "rules.operator.gte": "≥ (больше или равно)",
+        "rules.operator.lt": "< (меньше)",
+        "rules.operator.lte": "≤ (меньше или равно)",
+        "rules.operator.eq": "= (равно)",
+        "rules.operator.neq": "≠ (не равно)",
         "rules.field.threshold": "Порог",
         "rules.field.cooldown": "Cooldown (сек)",
         "rules.field.channels": "Каналы:",
@@ -76,6 +103,17 @@ const I18N = {
         "servers.status.active": "✅ active",
         "servers.status.inactive": "⏸ inactive",
         "servers.realtime": "реал-тайм",
+        "servers.alerts.badge": "{n} открытых",
+        "servers.alerts.none": "алертов нет",
+        "servers.metrics.cpu": "CPU",
+        "servers.metrics.ram": "RAM",
+        "servers.metrics.disk": "Disk",
+        "servers.metrics.no_data": "нет данных",
+        "time.now": "только что",
+        "time.seconds_ago": "{n} сек назад",
+        "time.minutes_ago": "{n} мин назад",
+        "time.hours_ago": "{n} ч назад",
+        "time.days_ago": "{n} д назад",
         "rules.empty": "У тебя нет правил. Создавай через POST /alerts/rules.",
         "rules.action.off": "выкл",
         "rules.action.on": "вкл",
@@ -116,6 +154,20 @@ const I18N = {
         "login.totp": "2FA code",
         "login.totp.required": "Enter the 6-digit code from your 2FA app",
         "profile.title": "Profile",
+        "profile.notifications.title": "Notifications",
+        "profile.email.label": "Email alerts",
+        "profile.email.error": "Failed to toggle email alerts",
+        "profile.telegram.label": "Telegram:",
+        "profile.telegram.unlinked": "not linked",
+        "profile.telegram.linked": "linked (chat_id: {chat_id})",
+        "profile.telegram.link.button": "Link",
+        "profile.telegram.unlink.button": "Unlink",
+        "profile.telegram.unlink.confirm": "Unlink Telegram? Notifications will stop.",
+        "profile.telegram.code.instructions": "Open the link in Telegram or send /start <code> to the bot:",
+        "profile.telegram.code.label": "Code:",
+        "profile.telegram.open": "Open in Telegram",
+        "profile.telegram.refresh": "Check",
+        "profile.telegram.no_link_yet": "Bot hasn't confirmed linking yet — send the code and click \"Check\".",
         "profile.totp.label": "2FA:",
         "profile.totp.on": "on",
         "profile.totp.off": "off",
@@ -126,6 +178,13 @@ const I18N = {
         "profile.totp.code": "Code from app",
         "profile.totp.confirm": "Confirm",
         "profile.totp.disable.prompt": "Enter your password to disable 2FA",
+        "servers.rotate.button": "Rotate API key",
+        "servers.rotate.title": "New API key",
+        "servers.rotate.warning": "Shown ONCE. Copy and update your agent. The old key no longer works.",
+        "servers.rotate.copy": "Copy",
+        "servers.rotate.confirm": "The old key will stop working immediately. Continue?",
+        "servers.rotate.error": "Failed to rotate key",
+        "servers.rotate.copied": "✓ Copied",
         "rules.title": "Alert rules",
         "rules.create": "Create rule",
         "rules.submit": "Create",
@@ -135,6 +194,12 @@ const I18N = {
         "rules.field.container": "Container name (empty = any)",
         "rules.field.metric": "Metric",
         "rules.field.operator": "Operator",
+        "rules.operator.gt": "> (greater than)",
+        "rules.operator.gte": "≥ (greater or equal)",
+        "rules.operator.lt": "< (less than)",
+        "rules.operator.lte": "≤ (less or equal)",
+        "rules.operator.eq": "= (equal)",
+        "rules.operator.neq": "≠ (not equal)",
         "rules.field.threshold": "Threshold",
         "rules.field.cooldown": "Cooldown (sec)",
         "rules.field.channels": "Channels:",
@@ -158,6 +223,17 @@ const I18N = {
         "servers.status.active": "✅ active",
         "servers.status.inactive": "⏸ inactive",
         "servers.realtime": "real-time",
+        "servers.alerts.badge": "{n} open",
+        "servers.alerts.none": "no alerts",
+        "servers.metrics.cpu": "CPU",
+        "servers.metrics.ram": "RAM",
+        "servers.metrics.disk": "Disk",
+        "servers.metrics.no_data": "no data",
+        "time.now": "just now",
+        "time.seconds_ago": "{n}s ago",
+        "time.minutes_ago": "{n}m ago",
+        "time.hours_ago": "{n}h ago",
+        "time.days_ago": "{n}d ago",
         "rules.empty": "You have no rules. Create one via POST /alerts/rules.",
         "rules.action.off": "off",
         "rules.action.on": "on",
@@ -351,7 +427,7 @@ async function fetchMe() {
 // ─── API: servers/rules/events/aggregates ───────────────────────────────────
 
 async function fetchServers() {
-    const response = await apiFetch("/servers/me");
+    const response = await apiFetch("/servers/dashboard");
     return response.ok ? response.json() : [];
 }
 
@@ -407,13 +483,17 @@ async function fetchAuditLog(limit = 100) {
 // ─── Состояние ──────────────────────────────────────────────────────────────
 
 const MAX_POINTS = 60;
-let serversCache = [];          // последняя загрузка /servers/me
+const SERVERS_REFRESH_MS = 30000;
+const RELATIVE_TIME_REFRESH_MS = 10000;
+let serversCache = [];          // последняя загрузка /servers/dashboard
 let currentTab = "servers";
 let currentChart = null;
 let aggregatesChart = null;
 let selectedServerId = null;
 let currentMetricsWs = null;
 let currentLogsWs = null;
+let serversPollTimer = null;
+let relativeTimeTimer = null;
 
 // ─── Вспомогательные ────────────────────────────────────────────────────────
 
@@ -428,6 +508,16 @@ function wsUrl(path, params = {}) {
     const tokens = getTokens();
     const qs = new URLSearchParams({...params, token: tokens?.access_token ?? ""});
     return `${proto}://${location.host}${path}?${qs}`;
+}
+
+function formatRelativeTime(iso) {
+    if (!iso) return t("servers.never");
+    const diffSec = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (diffSec < 10) return t("time.now");
+    if (diffSec < 60) return t("time.seconds_ago").replace("{n}", Math.floor(diffSec));
+    if (diffSec < 3600) return t("time.minutes_ago").replace("{n}", Math.floor(diffSec / 60));
+    if (diffSec < 86400) return t("time.hours_ago").replace("{n}", Math.floor(diffSec / 3600));
+    return t("time.days_ago").replace("{n}", Math.floor(diffSec / 86400));
 }
 
 // ─── Tab switching ──────────────────────────────────────────────────────────
@@ -476,28 +566,68 @@ function serverCard(server) {
     const card = document.createElement("div");
     card.className = "server-card";
     card.dataset.serverId = server.id;
+    if (server.last_seen_at) {
+        card.dataset.lastSeen = server.last_seen_at;
+    }
 
-    const lastSeen = server.last_seen_at
-        ? new Date(server.last_seen_at).toLocaleString()
-        : t("servers.never");
     const statusClass = server.is_active ? "status-active" : "status-inactive";
     const statusText = server.is_active ? t("servers.status.active") : t("servers.status.inactive");
     const version = server.agent_version ?? "—";
+    const openAlerts = server.open_alerts_count ?? 0;
+    const metric = server.latest_metric;
+
+    const badgeHtml = openAlerts > 0
+        ? `<span class="alerts-badge" title="${t("servers.alerts.badge").replace("{n}", openAlerts)}">${openAlerts}</span>`
+        : "";
+
+    const metricsHtml = metric
+        ? `
+            <div class="server-metrics">
+                <span><span class="metric-label">${t("servers.metrics.cpu")}</span> ${metric.cpu_percent.toFixed(0)}%</span>
+                <span><span class="metric-label">${t("servers.metrics.ram")}</span> ${metric.memory_percent.toFixed(0)}%</span>
+                <span><span class="metric-label">${t("servers.metrics.disk")}</span> ${metric.disk_percent.toFixed(0)}%</span>
+            </div>`
+        : `<div class="server-metrics empty">${t("servers.metrics.no_data")}</div>`;
 
     card.innerHTML = `
         <div class="server-card-header">
-            <span class="server-name">${escapeHtml(server.name)}</span>
+            <span class="server-name">${escapeHtml(server.name)} ${badgeHtml}</span>
             <span class="server-id">#${server.id}</span>
         </div>
         <div class="server-meta">
             <div class="${statusClass}">${statusText}</div>
-            <div>${t("servers.last_seen")} ${escapeHtml(lastSeen)}</div>
+            <div>${t("servers.last_seen")} <span class="last-seen-rel">${escapeHtml(formatRelativeTime(server.last_seen_at))}</span></div>
             <div>${t("servers.agent")} ${escapeHtml(version)}</div>
         </div>
+        ${metricsHtml}
     `;
 
     card.addEventListener("click", () => selectServer(server));
     return card;
+}
+
+function refreshRelativeTimes() {
+    document.querySelectorAll(".server-card").forEach((card) => {
+        const iso = card.dataset.lastSeen || null;
+        const el = card.querySelector(".last-seen-rel");
+        if (el) el.textContent = formatRelativeTime(iso);
+    });
+}
+
+async function pollServers() {
+    if (currentTab !== "servers") return;
+    try {
+        const fresh = await fetchServers();
+        serversCache = fresh;
+        renderServers(serversCache);
+        if (selectedServerId !== null) {
+            document.querySelectorAll(".server-card").forEach((el) => {
+                el.classList.toggle("selected", Number(el.dataset.serverId) === selectedServerId);
+            });
+        }
+    } catch (e) {
+        /* сетевой сбой — ждём следующего тика */
+    }
 }
 
 async function selectServer(server) {
@@ -912,6 +1042,43 @@ function closeLogsWs() {
     }
 }
 
+// ─── Rotate API key ────────────────────────────────────────────────────────
+
+async function rotateApiKey() {
+    if (!selectedServerId) return;
+    if (!confirm(t("servers.rotate.confirm"))) return;
+
+    const response = await apiFetch(`/servers/${selectedServerId}/rotate-key`, {method: "POST"});
+    if (!response.ok) {
+        alert(t("servers.rotate.error"));
+        return;
+    }
+    const data = await response.json();
+    showRotateKeyModal(data.api_key);
+}
+
+function showRotateKeyModal(apiKey) {
+    document.getElementById("rotate-key-value").textContent = apiKey;
+    document.getElementById("rotate-key-modal").hidden = false;
+}
+
+function closeRotateKeyModal() {
+    document.getElementById("rotate-key-modal").hidden = true;
+}
+
+async function copyRotateKey() {
+    const value = document.getElementById("rotate-key-value").textContent;
+    try {
+        await navigator.clipboard.writeText(value);
+    } catch (e) {
+        return;
+    }
+    const btn = document.getElementById("rotate-key-copy");
+    const originalLabel = btn.textContent;
+    btn.textContent = t("servers.rotate.copied");
+    setTimeout(() => { btn.textContent = originalLabel; }, 1500);
+}
+
 // ─── Profile modal + TOTP ──────────────────────────────────────────────────
 
 let currentUser = null;
@@ -921,9 +1088,86 @@ async function openProfileModal() {
     if (!currentUser) return;
 
     document.getElementById("profile-email").textContent = currentUser.email;
+    renderNotificationsArea();
     renderTotpStatus();
     document.getElementById("totp-setup-area").hidden = true;
+    document.getElementById("telegram-link-info").hidden = true;
     document.getElementById("profile-modal").hidden = false;
+}
+
+function renderNotificationsArea() {
+    const emailBox = document.getElementById("email-alerts-checkbox");
+    emailBox.checked = !!currentUser?.email_alerts_enabled;
+
+    const chatId = currentUser?.telegram_chat_id;
+    const statusEl = document.getElementById("telegram-status");
+    if (chatId) {
+        statusEl.textContent = t("profile.telegram.linked").replace("{chat_id}", chatId);
+        document.getElementById("telegram-link-btn").hidden = true;
+        document.getElementById("telegram-unlink-btn").hidden = false;
+    } else {
+        statusEl.textContent = t("profile.telegram.unlinked");
+        document.getElementById("telegram-link-btn").hidden = false;
+        document.getElementById("telegram-unlink-btn").hidden = true;
+    }
+}
+
+async function toggleEmailAlerts(event) {
+    const checkbox = event.target;
+    const desired = checkbox.checked;
+    const response = await apiFetch("/auth/me/email-alerts", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enabled: desired}),
+    });
+    if (!response.ok) {
+        checkbox.checked = !desired;
+        alert(t("profile.email.error"));
+        return;
+    }
+    currentUser = await response.json();
+}
+
+async function startTelegramLink() {
+    const response = await apiFetch("/auth/me/telegram/code", {method: "POST"});
+    if (!response.ok) return;
+    const data = await response.json();
+
+    document.getElementById("telegram-code").textContent = data.code;
+    const linkEl = document.getElementById("telegram-deep-link");
+    if (data.deep_link) {
+        linkEl.href = data.deep_link;
+        linkEl.textContent = t("profile.telegram.open");
+        linkEl.hidden = false;
+    } else {
+        linkEl.hidden = true;
+    }
+    document.getElementById("telegram-link-info").hidden = false;
+}
+
+async function unlinkTelegram() {
+    if (!confirm(t("profile.telegram.unlink.confirm"))) return;
+    const response = await apiFetch("/auth/me/telegram", {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({chat_id: null}),
+    });
+    if (!response.ok) return;
+    currentUser = await response.json();
+    renderNotificationsArea();
+    document.getElementById("telegram-link-info").hidden = true;
+}
+
+async function refreshTelegramStatus() {
+    const fresh = await fetchMe();
+    if (!fresh) return;
+    currentUser = fresh;
+    renderNotificationsArea();
+    if (currentUser.telegram_chat_id) {
+        document.getElementById("telegram-link-info").hidden = true;
+    } else {
+        alert(t("profile.telegram.no_link_yet"));
+    }
 }
 
 function closeProfileModal() {
@@ -1089,6 +1333,7 @@ function renderLogin() {
     document.getElementById("user-bar").hidden = true;
     document.getElementById("login-error").hidden = true;
     document.getElementById("login-form").reset();
+    stopServerPolling();
 }
 
 async function renderDashboard(user) {
@@ -1100,6 +1345,20 @@ async function renderDashboard(user) {
     serversCache = await fetchServers();
     renderServers(serversCache);
     setTab("servers");
+    startServerPolling();
+}
+
+function startServerPolling() {
+    stopServerPolling();
+    serversPollTimer = setInterval(pollServers, SERVERS_REFRESH_MS);
+    relativeTimeTimer = setInterval(refreshRelativeTimes, RELATIVE_TIME_REFRESH_MS);
+}
+
+function stopServerPolling() {
+    if (serversPollTimer) clearInterval(serversPollTimer);
+    if (relativeTimeTimer) clearInterval(relativeTimeTimer);
+    serversPollTimer = null;
+    relativeTimeTimer = null;
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────────
@@ -1151,6 +1410,17 @@ async function init() {
     document.getElementById("totp-enable-btn").addEventListener("click", startTotpSetup);
     document.getElementById("totp-disable-btn").addEventListener("click", disableTotp);
     document.getElementById("totp-confirm-btn").addEventListener("click", confirmTotpEnable);
+
+    // Notifications section handlers
+    document.getElementById("email-alerts-checkbox").addEventListener("change", toggleEmailAlerts);
+    document.getElementById("telegram-link-btn").addEventListener("click", startTelegramLink);
+    document.getElementById("telegram-unlink-btn").addEventListener("click", unlinkTelegram);
+    document.getElementById("telegram-link-refresh").addEventListener("click", refreshTelegramStatus);
+
+    // Rotate API key handlers
+    document.getElementById("rotate-key-btn").addEventListener("click", rotateApiKey);
+    document.getElementById("rotate-key-close").addEventListener("click", closeRotateKeyModal);
+    document.getElementById("rotate-key-copy").addEventListener("click", copyRotateKey);
 
     // «Забыли пароль?» — prompt email, POST /auth/forgot-password
     document.getElementById("forgot-password-link").addEventListener("click", async (e) => {

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.security import hash_password
 from app.database import get_db
+from app.models.alert_event import AlertEvent
 from app.models.docker_aggregate import DockerAggregate
 from app.models.docker_metric import DockerMetric
 from app.models.log_entry import LogEntry
@@ -187,6 +188,17 @@ async def dashboard(
                 "collected_at": row.collected_at.isoformat(),
             }
 
+    open_alerts: dict[int, int] = {}
+    if server_ids:
+        alerts_rows = await db.execute(
+            select(AlertEvent.server_id, func.count(AlertEvent.id))
+            .where(AlertEvent.server_id.in_(server_ids))
+            .where(AlertEvent.resolved_at.is_(None))
+            .group_by(AlertEvent.server_id)
+        )
+        for server_id, count in alerts_rows.all():
+            open_alerts[server_id] = count
+
     dashboard_data = []
     for server in servers:
         server_info = {
@@ -194,6 +206,8 @@ async def dashboard(
             "name": server.name,
             "is_active": server.is_active,
             "last_seen_at": server.last_seen_at.isoformat() if server.last_seen_at else None,
+            "agent_version": server.agent_version,
+            "open_alerts_count": open_alerts.get(server.id, 0),
             "latest_metric": None,
         }
 

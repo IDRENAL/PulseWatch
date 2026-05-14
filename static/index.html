@@ -77,6 +77,9 @@
             <div id="servers-list"></div>
             <section id="detail-panel" hidden>
                 <h2 id="detail-title">—</h2>
+                <div class="detail-actions">
+                    <button id="rotate-key-btn" class="btn-small" data-i18n="servers.rotate.button">Ротировать API-ключ</button>
+                </div>
                 <div class="chart-wrap">
                     <canvas id="metrics-chart"></canvas>
                 </div>
@@ -108,12 +111,12 @@
                 </label>
                 <label><span data-i18n="rules.field.operator">Оператор</span>
                     <select id="rule-operator">
-                        <option value="gt">gt</option>
-                        <option value="gte">gte</option>
-                        <option value="lt">lt</option>
-                        <option value="lte">lte</option>
-                        <option value="eq">eq</option>
-                        <option value="neq">neq</option>
+                        <option value="gt" data-i18n="rules.operator.gt">&gt; (больше)</option>
+                        <option value="gte" data-i18n="rules.operator.gte">&ge; (больше или равно)</option>
+                        <option value="lt" data-i18n="rules.operator.lt">&lt; (меньше)</option>
+                        <option value="lte" data-i18n="rules.operator.lte">&le; (меньше или равно)</option>
+                        <option value="eq" data-i18n="rules.operator.eq">= (равно)</option>
+                        <option value="neq" data-i18n="rules.operator.neq">&ne; (не равно)</option>
                     </select>
                 </label>
                 <label><span data-i18n="rules.field.threshold">Порог</span>
@@ -196,6 +199,34 @@
             <div class="modal">
                 <h3 data-i18n="profile.title">Профиль</h3>
                 <p id="profile-email" class="empty"></p>
+                <div id="notifications-area" class="profile-section">
+                    <h4 data-i18n="profile.notifications.title">Уведомления</h4>
+                    <p>
+                        <label>
+                            <input type="checkbox" id="email-alerts-checkbox">
+                            <span data-i18n="profile.email.label">Email-уведомления</span>
+                        </label>
+                    </p>
+                    <p>
+                        <span data-i18n="profile.telegram.label">Telegram:</span>
+                        <strong id="telegram-status">—</strong>
+                    </p>
+                    <p>
+                        <button id="telegram-link-btn" class="btn-small" data-i18n="profile.telegram.link.button" hidden>Привязать</button>
+                        <button id="telegram-unlink-btn" class="btn-small btn-secondary" data-i18n="profile.telegram.unlink.button" hidden>Отвязать</button>
+                    </p>
+                    <div id="telegram-link-info" hidden>
+                        <p data-i18n="profile.telegram.code.instructions">Открой ссылку в Telegram или отправь боту команду <code>/start &lt;код&gt;</code>:</p>
+                        <p>
+                            <a id="telegram-deep-link" href="#" target="_blank" rel="noopener" hidden></a>
+                        </p>
+                        <p>
+                            <span data-i18n="profile.telegram.code.label">Код:</span>
+                            <code id="telegram-code" style="user-select: all;"></code>
+                        </p>
+                        <button id="telegram-link-refresh" class="btn-small" data-i18n="profile.telegram.refresh">Проверить</button>
+                    </div>
+                </div>
                 <div id="totp-status-area">
                     <p>
                         <span data-i18n="profile.totp.label">2FA:</span>
@@ -222,6 +253,21 @@
                 </div>
                 <p style="margin-top: 16px;">
                     <button id="profile-close" class="btn-secondary" data-i18n="cancel">Закрыть</button>
+                </p>
+            </div>
+        </div>
+
+        <!-- Rotate API key modal -->
+        <div id="rotate-key-modal" class="modal-overlay" hidden>
+            <div class="modal">
+                <h3 data-i18n="servers.rotate.title">Новый API-ключ</h3>
+                <p data-i18n="servers.rotate.warning">Покажу ОДИН раз. Скопируй и обнови агент. Старый ключ больше не работает.</p>
+                <p>
+                    <code id="rotate-key-value" style="user-select: all; word-break: break-all;"></code>
+                </p>
+                <p style="margin-top: 16px;">
+                    <button id="rotate-key-copy" data-i18n="servers.rotate.copy">Скопировать</button>
+                    <button id="rotate-key-close" class="btn-secondary" data-i18n="cancel">Закрыть</button>
                 </p>
             </div>
         </div>

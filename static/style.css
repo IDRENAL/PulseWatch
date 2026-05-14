@@ -22,7 +22,7 @@
     --text-primary: #1a1a2e;
     --text-secondary: #555570;
     --text-muted: #909098;
-    --accent: #5570d6;
+    --accent: #bd4f4f;
     --accent-hover: #3a55b8;
     --accent-on: #ffffff;
     --success: #2e8b3a;
@@ -190,6 +190,35 @@ button:hover {
     font-size: 12px;
 }
 
+.detail-actions {
+    margin: 12px 0;
+}
+
+.profile-section {
+    margin: 16px 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+}
+
+.profile-section h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.profile-section label {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    display: inline-flex;
+    width: auto;
+}
+
+.profile-section p {
+    margin: 8px 0;
+}
+
 .error {
     color: var(--danger);
     font-size: 14px;
@@ -246,6 +275,43 @@ button:hover {
     font-size: 13px;
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+.server-metrics {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--bg-tertiary);
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.server-metrics .metric-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 2px;
+}
+
+.server-metrics.empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.alerts-badge {
+    display: inline-block;
+    min-width: 18px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    border-radius: 9px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    vertical-align: middle;
 }
 
 .status-active,
@@ -375,6 +441,10 @@ tr:hover td {
     justify-content: center;
     z-index: 100;
     padding: 16px;
+}
+
+.modal-overlay[hidden] {
+    display: none;
 }
 
 .modal {
